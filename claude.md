@@ -20,6 +20,7 @@ them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net
 - `database.py` — SQLite models and transaction functions (Transaction model)
 - `categoriser.py` — merchant categorisation logic using known rules + Ollama fallback (with ddgs web search context)
 - `networth.py` — net worth/asset tracking models and functions (AssetValue model)
+- `budget.py` — personal and household budget models and functions (PersonalBudgetItem, HouseholdBudgetItem, BudgetSetting)
 - `chat.py` — Ollama chat interface with spending context and tool-calling for category/net worth updates
 - `budget_bot.db` — SQLite database (do not delete)
 - `start.sh` — shell script to launch the app
@@ -27,10 +28,18 @@ them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net
 ## Pages (sidebar navigation)
 1. **Dashboard** — spending metrics, category bar chart, monthly trend line, top 10 transactions
 2. **Net Worth** — asset tracking with time-series graphs, imported from Worth It app export
-3. **Chat** — natural language interface powered by Ollama for questions, category fixes, and net worth updates (proposed changes require a Confirm/Cancel click before writing to the database)
-4. **Upload Statement** — PDF upload and transaction parsing for Chase bank statements
-5. **View Transactions** — full transaction table with month filter and categorisation buttons
-6. **Manage Categories** — review and correct merchant categories
+3. **Personal Budget** — live-editable Money In/Money Out grids, manually-entered total income (minus salary sacrifice), and computed income-minus-expenses/money-per-week figures
+4. **Household Budget** — live-editable bills grid (service, provider, renewal date, amount) with a computed total, and an editable percentage split between the two people in the household
+5. **Upload Statement** — PDF upload and transaction parsing for Chase bank statements
+6. **View Transactions** — full transaction table with month, merchant, and category filters and categorisation buttons
+7. **Manage Categories** — review and correct merchant categories
+
+There is no standalone Chat page — the chat interface (natural language questions, category
+fixes, and net worth updates, with a Confirm/Cancel click required before writing to the database)
+lives permanently in the sidebar below the page navigation, rendered on every page regardless of
+which one is selected. It uses Streamlit's inline `st.chat_input` positioning (only pins to the
+bottom of the viewport when placed directly in the main body) with a fixed-height `st.container`
+for scrollable message history.
 
 ## Database models
 ### Transaction (database.py)
@@ -38,6 +47,23 @@ them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net
 
 ### AssetValue (networth.py)
 - id, asset_name (String), tag (String), value (Float), recorded_at (DateTime)
+
+### PersonalBudgetItem (budget.py)
+- id, section (String — 'Money In' or 'Money Out'), name (String), amount (Float)
+- No history — editing overwrites the current figure (unlike AssetValue). "Money In" items are
+  reference-only and not summed by any formula; the actual income figure used in calculations is
+  a separate manually-entered setting (see BudgetSetting) since Jonathan doesn't have a full
+  salary-sacrifice breakdown to derive it from.
+
+### HouseholdBudgetItem (budget.py)
+- id, service (String), provider (String), renewal_date (String, informational only), amount (Float)
+- Amount is displayed as "New House" in the UI (a permanent label, not a house-move leftover) but
+  kept as a generic column name in the schema.
+
+### BudgetSetting (budget.py)
+- key (String, primary key), value (String, cast to float at the call site)
+- Generic key/value table. Two keys in use: `personal_total_income` (manual override for Personal
+  Budget) and `household_split_percent` (editable % split between the two people in the household).
 
 ## Categories used
 Groceries, Eating Out & Takeaway, Coffee & Beans, Shopping, Transport, Health & Fitness,

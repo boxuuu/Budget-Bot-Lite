@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine, Column, String, Float, Integer, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
 from datetime import datetime, timezone
+import pandas as pd
 
 Base = declarative_base()
 
@@ -100,6 +101,99 @@ def get_asset_names():
     names = db.query(AssetValue.asset_name).distinct().all()
     db.close()
     return [n[0] for n in names]
+
+def get_asset_name_tags():
+    """Returns {asset_name: tag} - lets callers group assets by category
+    (e.g. all 'Pension'-tagged assets) without the caller needing to know
+    the exact set of asset names in advance."""
+    db = get_networth_db()
+    rows = db.query(AssetValue.asset_name, AssetValue.tag).distinct().all()
+    db.close()
+    return dict(rows)
+
+def get_total_net_worth_series(asset_names=None):
+    """Returns a DataFrame ['Date', 'Total']: one row per calendar day any
+    asset had a recorded value, across the FULL history (never filtered),
+    with each asset forward-filled to its last known value so a day only one
+    asset was updated still counts every other asset's last value.
+
+    If asset_names is given, only those assets are summed - e.g. to project
+    "just my pensions and ISA" rather than everything tracked."""
+    records = get_all_asset_history()
+    if asset_names is not None:
+        records = [r for r in records if r.asset_name in asset_names]
+    if not records:
+        return pd.DataFrame(columns=['Date', 'Total'])
+
+    df = pd.DataFrame([{
+        'Date': r.recorded_at, 'Asset': r.asset_name, 'Value': r.value
+    } for r in records])
+    df['DateOnly'] = df['Date'].dt.date
+    asset_pivot = df.sort_values('Date').pivot_table(
+        index='DateOnly', columns='Asset', values='Value', aggfunc='last'
+    ).ffill()
+    daily_total = asset_pivot.sum(axis=1).reset_index()
+    daily_total.columns = ['Date', 'Total']
+    return daily_total
+
+# Minimum span of history before an annualised growth rate is meaningful -
+# a few days of data would produce a wildly extrapolated rate
+MIN_GROWTH_RATE_DAYS = 90
+
+def calculate_growth_rate(series=None):
+    """Computes a simple annualised growth rate from the first to last point
+    of a total net worth series (as from get_total_net_worth_series()). This
+    is a BLENDED rate - it reflects market movement AND the user's own
+    contributions/withdrawals, not a pure investment return.
+
+    Returns (rate, span_days). rate is None when there are fewer than 2 data
+    points, the starting value isn't positive, or the span is too short to
+    annualise meaningfully."""
+    if series is None:
+        series = get_total_net_worth_series()
+
+    if len(series) < 2:
+        return None, 0
+
+    first_row, last_row = series.iloc[0], series.iloc[-1]
+    first_value, last_value = first_row['Total'], last_row['Total']
+    span_days = (pd.Timestamp(last_row['Date']) - pd.Timestamp(first_row['Date'])).days
+
+    if first_value <= 0 or span_days < MIN_GROWTH_RATE_DAYS:
+        return None, span_days
+
+    years = span_days / 365.25
+    rate = (last_value / first_value) ** (1 / years) - 1
+    return rate, span_days
+
+def project_net_worth(years=5, asset_names=None, series=None):
+    """Projects net worth forward `years` years from the latest known data
+    point, using calculate_growth_rate(). If asset_names is given, only
+    projects that subset (e.g. just pensions + ISA) rather than everything.
+    Returns a dict:
+      ok, reason ('no_data' | 'insufficient_history' | None),
+      anchor_date, anchor_value, projected_value, rate, span_days, years"""
+    if series is None:
+        series = get_total_net_worth_series(asset_names=asset_names)
+
+    if series.empty:
+        return {'ok': False, 'reason': 'no_data', 'anchor_date': None,
+                'anchor_value': None, 'projected_value': None,
+                'rate': None, 'span_days': 0, 'years': years}
+
+    rate, span_days = calculate_growth_rate(series)
+    anchor_row = series.iloc[-1]
+    anchor_date, anchor_value = anchor_row['Date'], anchor_row['Total']
+
+    if rate is None:
+        return {'ok': False, 'reason': 'insufficient_history', 'anchor_date': anchor_date,
+                'anchor_value': anchor_value, 'projected_value': None,
+                'rate': None, 'span_days': span_days, 'years': years}
+
+    projected_value = anchor_value * (1 + rate) ** years
+    return {'ok': True, 'reason': None, 'anchor_date': anchor_date,
+            'anchor_value': anchor_value, 'projected_value': projected_value,
+            'rate': rate, 'span_days': span_days, 'years': years}
 
 def update_asset_value(asset_name, value, tag=None):
     db = get_networth_db()

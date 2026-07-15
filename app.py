@@ -9,6 +9,34 @@ from database import get_db, Transaction
 st.set_page_config(page_title="Budget Bot", layout="wide")
 st.title("Budget Bot")
 
+# Shared styling: every card container uses key="card_<page>_<section>" so
+# this one rule can style them all at once, without touching background/text
+# colors (those come from primaryColor + Streamlit's native light/dark
+# resolution, set in .streamlit/config.toml, so the built-in theme toggle
+# keeps working). Also carries the enlarged-metric rule previously
+# duplicated per-page on Net Worth.
+st.markdown(
+    """
+    <style>
+    div[class*="st-key-card_"] {
+        padding: 1rem 1.25rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    @media (prefers-color-scheme: dark) {
+        div[class*="st-key-card_"] {
+            box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+        }
+    }
+    .st-key-nw_asset_metric [data-testid="stMetricValue"],
+    .st-key-nw_total_metric [data-testid="stMetricValue"] {
+        font-size: 3rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 def is_date(text):
     return bool(re.match(r'\d{2} \w{3} \d{4}', text))
 
@@ -58,7 +86,80 @@ def parse_transactions(lines):
 
 # --- Sidebar ---
 st.sidebar.title("Navigation")
-page = st.sidebar.radio("Go to", ["Dashboard", "Net Worth", "Chat", "Upload Statement", "View Transactions", "Manage Categories"])
+page = st.sidebar.radio("Go to", ["Dashboard", "Net Worth", "Personal Budget", "Household Budget", "Upload Statement", "View Transactions", "Manage Categories"])
+
+st.sidebar.divider()
+
+# --- Persistent Chat (always visible, independent of which page is selected) ---
+with st.sidebar:
+    st.subheader("Chat with Budget Bot")
+
+    from chat import chat_with_budget_bot, update_category
+    from networth import update_asset_value
+
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    if "pending_action" not in st.session_state:
+        st.session_state.pending_action = None
+
+    chat_history = st.container(height=400)
+    with chat_history:
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.write(message["content"])
+
+        if st.session_state.pending_action:
+            action = st.session_state.pending_action
+            with st.chat_message("assistant"), st.container(border=True, key="chatcard_pending_action"):
+                st.write(action["display"])
+                confirm_col, cancel_col = st.columns(2)
+                with confirm_col:
+                    if st.button("Confirm", key="confirm_pending_action", use_container_width=True):
+                        if action["type"] == "update_networth":
+                            update_asset_value(action["asset_name"], action["value"])
+                            result_text = f"Updated {action['asset_name']} to £{action['value']:,.2f}."
+                        else:
+                            count = update_category(action["merchant_name"], action["new_category"])
+                            result_text = f"Updated {count} transaction(s) to {action['new_category']}."
+                        st.session_state.messages.append({"role": "assistant", "content": result_text})
+                        st.session_state.pending_action = None
+                        st.rerun()
+                with cancel_col:
+                    if st.button("Cancel", key="cancel_pending_action", use_container_width=True):
+                        st.session_state.messages.append({"role": "assistant", "content": "Okay, no changes made."})
+                        st.session_state.pending_action = None
+                        st.rerun()
+
+    if prompt := st.chat_input("Ask Budget Bot something..."):
+        if st.session_state.pending_action:
+            st.session_state.pending_action = None
+
+        st.session_state.messages.append({
+            "role": "user",
+            "content": prompt
+        })
+
+        with chat_history:
+            with st.chat_message("user"):
+                st.write(prompt)
+
+            with st.chat_message("assistant"):
+                with st.spinner("Thinking..."):
+                    result = chat_with_budget_bot(
+                        st.session_state.messages[:-1],
+                        prompt
+                    )
+                    st.write(result["text"])
+
+        if result["pending_action"]:
+            st.session_state.pending_action = result["pending_action"]
+            st.rerun()
+        else:
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": result["text"]
+            })
 
 # --- Dashboard Page ---
 if page == "Dashboard":
@@ -69,6 +170,11 @@ if page == "Dashboard":
     if not all_transactions:
         st.info("No transactions yet - upload a statement first")
     else:
+        import plotly.express as px
+        from datetime import datetime, timedelta
+        from analytics import month_sort_key, calculate_savings_rate
+        from networth import get_total_net_worth_series
+
         df = pd.DataFrame([{
             'Date': t.date,
             'Description': t.description,
@@ -81,79 +187,154 @@ if page == "Dashboard":
         spending = df[df['Amount'] < 0].copy()
         spending['Amount'] = spending['Amount'].abs()
 
-        # --- Summary Metrics ---
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Total Spent (6 months)", f"£{spending['Amount'].sum():,.2f}")
-        with col2:
-            st.metric("Monthly Average", f"£{spending['Amount'].sum() / 6:,.2f}")
-        with col3:
-            st.metric("Total Transactions", len(spending))
+        # --- KPI row ---
+        with st.container(border=True, key="card_dashboard_kpis"):
+            col1, col2, col3, col4 = st.columns(4)
 
-        st.divider()
+            with col1:
+                nw_series = get_total_net_worth_series()
+                if not nw_series.empty:
+                    current_net_worth = nw_series.iloc[-1]['Total']
+                    six_months_ago = datetime.utcnow().date() - timedelta(days=182)
+                    past = nw_series[nw_series['Date'] <= six_months_ago]
+                    baseline = past.iloc[-1]['Total'] if not past.empty else nw_series.iloc[0]['Total']
+                    nw_pct_change = ((current_net_worth - baseline) / baseline * 100) if baseline else 0
+                    st.metric("Net Worth", f"£{current_net_worth:,.0f}", delta=f"{nw_pct_change:+.1f}% (6mo)")
+                else:
+                    st.metric("Net Worth", "No data yet")
 
-        # --- Spending by Category ---
-        st.subheader("Spending by Category")
-        category_totals = spending.groupby('Category')['Amount'].sum().sort_values(ascending=False)
-        st.bar_chart(category_totals)
+            with col2:
+                st.metric("Total Spent (6 months)", f"£{spending['Amount'].sum():,.2f}")
 
-        st.divider()
+            with col3:
+                st.metric("Monthly Average", f"£{spending['Amount'].sum() / 6:,.2f}")
+
+            with col4:
+                savings_info = calculate_savings_rate(all_transactions)
+                if savings_info['typical_monthly_income']:
+                    st.metric(
+                        "Savings Rate",
+                        f"£{savings_info['avg_savings']:,.0f}/mo",
+                        delta=f"{savings_info['savings_rate']:.0f}% of salary"
+                    )
+                else:
+                    st.metric("Savings Rate", "N/A")
+
+        # --- Category pie + Top merchants ---
+        col_pie, col_merchants = st.columns(2)
+
+        with col_pie, st.container(border=True, key="card_dashboard_pie"):
+            st.subheader("Spending by Category")
+            category_totals = spending.groupby('Category')['Amount'].sum().sort_values(ascending=False)
+
+            # Cap the pie at the 6 biggest categories - beyond that it gets too
+            # cluttered to read at a glance - and fold the rest into one slice.
+            # The literal "Other" category is itself a catch-all, so it's
+            # always folded in here too rather than ever shown as a top
+            # slice - otherwise "Other" and "Other categories" would show up
+            # side by side, which reads as a labeling mistake.
+            real_categories = category_totals.drop('Other', errors='ignore')
+            top6 = real_categories.head(6)
+            other_total = category_totals.sum() - top6.sum()
+            pie_data = top6.copy()
+            if other_total > 0:
+                pie_data['Other categories'] = other_total
+            pie_data = pie_data.reset_index()
+            pie_data.columns = ['Category', 'Amount']
+
+            # Validated categorical palette (fixed hue order), muted gray for
+            # the folded "Other categories" bucket so it reads as an
+            # aggregate rather than a peer category
+            palette = ['#2a78d6', '#008300', '#e87ba4', '#eda100', '#1baf7a', '#eb6834']
+            color_map = {cat: palette[i] for i, cat in enumerate(top6.index)}
+            color_map['Other categories'] = '#898781'
+
+            fig_pie = px.pie(
+                pie_data, values='Amount', names='Category',
+                color='Category', color_discrete_map=color_map
+            )
+            fig_pie.update_traces(textinfo='label+percent', textposition='inside')
+            fig_pie.update_layout(
+                showlegend=True,
+                margin=dict(l=0, r=0, t=10, b=0),
+                paper_bgcolor='rgba(0,0,0,0)'
+            )
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+        with col_merchants, st.container(border=True, key="card_dashboard_merchants"):
+            st.subheader("Top 10 Merchants")
+            merchant_totals = spending.groupby('Description').agg(
+                Category=('Category', 'first'),
+                Total=('Amount', 'sum'),
+                Transactions=('Amount', 'count')
+            ).sort_values('Total', ascending=False).head(10).reset_index()
+            merchant_totals.columns = ['Merchant', 'Category', 'Total', 'Transactions']
+            merchant_totals['Total'] = merchant_totals['Total'].apply(lambda x: f"£{x:,.2f}")
+            st.dataframe(merchant_totals, use_container_width=True, hide_index=True)
 
         # --- Month by Month Trend ---
-        st.subheader("Monthly Spending Trend")
-        
-        # Sort months chronologically
-        month_order = ['Jan 2026', 'Feb 2026', 'Mar 2026', 'Apr 2026', 'May 2026', 'Jun 2026']
-        monthly_totals = spending.groupby('Month')['Amount'].sum()
-        monthly_totals = monthly_totals.reindex([m for m in month_order if m in monthly_totals.index])
-        st.line_chart(monthly_totals)
+        with st.container(border=True, key="card_dashboard_trend"):
+            st.subheader("Monthly Spending Trend")
 
-        st.divider()
+            monthly_totals = spending.groupby('Month')['Amount'].sum()
+            monthly_totals = monthly_totals.reindex(sorted(monthly_totals.index, key=month_sort_key)).reset_index()
+            monthly_totals.columns = ['Month', 'Amount']
 
-        # --- Top 10 Biggest Transactions ---
-        st.subheader("Top 10 Biggest Transactions")
-        top10 = spending.nlargest(10, 'Amount')[['Date', 'Description', 'Category', 'Amount']]
-        top10['Amount'] = top10['Amount'].apply(lambda x: f"£{x:,.2f}")
-        st.dataframe(top10, use_container_width=True)
+            fig_trend = px.line(monthly_totals, x='Month', y='Amount', labels={'Amount': 'Spending (£)', 'Month': ''})
+            fig_trend.update_traces(line_color='#1D9E75', line_width=2)
+            fig_trend.update_layout(
+                yaxis_tickprefix='£',
+                yaxis_tickformat=',.0f',
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                margin=dict(l=0, r=0, t=0, b=0)
+            )
+            st.plotly_chart(fig_trend, use_container_width=True)
 
-if page == "Upload Statement":
+# --- Upload Statement Page ---
+elif page == "Upload Statement":
     st.header("Upload Statement")
-    st.write("Upload a bank statement PDF to add it to Budget Bot.")
-    
-    uploaded_file = st.file_uploader("Upload your bank statement", type="pdf")
-    
-    if uploaded_file is not None:
-        pdf = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-        
-        lines = []
-        for page_num in pdf:
-            for line in page_num.get_text().split('\n'):
-                line = line.strip()
-                if line:
-                    lines.append(line)
 
-        transactions = parse_transactions(lines)
-        
-        if transactions:
-            st.success(f"Found {len(transactions)} transactions in this statement")
-            
-            if st.button("Save to Budget Bot"):
-                saved, skipped = save_transactions(transactions)
-                st.success(f"Saved {saved} new transactions. Skipped {skipped} duplicates.")
-        else:
-            st.warning("No transactions found")
+    with st.container(border=True, key="card_upload_statement"):
+        st.write("Upload a bank statement PDF to add it to Budget Bot.")
 
-            # --- Net Worth Page ---
+        uploaded_file = st.file_uploader("Upload your bank statement", type="pdf")
+
+        if uploaded_file is not None:
+            pdf = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+
+            lines = []
+            for page_num in pdf:
+                for line in page_num.get_text().split('\n'):
+                    line = line.strip()
+                    if line:
+                        lines.append(line)
+
+            transactions = parse_transactions(lines)
+
+            if transactions:
+                st.success(f"Found {len(transactions)} transactions in this statement")
+
+                if st.button("Save to Budget Bot"):
+                    saved, skipped = save_transactions(transactions)
+                    st.success(f"Saved {saved} new transactions. Skipped {skipped} duplicates.")
+            else:
+                st.warning("No transactions found")
+
+# --- Net Worth Page ---
 elif page == "Net Worth":
     st.header("Net Worth")
 
     from networth import (
         get_all_asset_history, get_asset_names, import_from_worthit,
-        update_asset_value, delete_asset
+        update_asset_value, delete_asset,
+        get_total_net_worth_series, project_net_worth
     )
     import plotly.express as px
     import plotly.graph_objects as go
     import pandas as pd
+
+    PROJECTION_YEARS = 5
     from datetime import datetime, timedelta
 
     if 'nw_selected_asset' not in st.session_state:
@@ -218,52 +399,42 @@ elif page == "Net Worth":
             asset_df = asset_df[asset_df['Date'] >= cutoff]
 
         st.caption(f"Showing: {selected_filter}")
-        st.divider()
 
-        st.subheader(asset)
+        with st.container(border=True, key="card_nw_asset_detail"):
+            st.subheader(asset)
 
-        latest_val = asset_df.iloc[-1]['Value'] if not asset_df.empty else 0
-        first_val = asset_df.iloc[0]['Value'] if not asset_df.empty else 0
-        pct_change = ((latest_val - first_val) / first_val * 100) if first_val else 0
+            latest_val = asset_df.iloc[-1]['Value'] if not asset_df.empty else 0
+            first_val = asset_df.iloc[0]['Value'] if not asset_df.empty else 0
+            pct_change = ((latest_val - first_val) / first_val * 100) if first_val else 0
 
-        st.markdown(
-            """
-            <style>
-            .st-key-nw_asset_metric [data-testid="stMetricValue"] { font-size: 3rem; }
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-        with st.container(key="nw_asset_metric"):
-            st.metric(
-                "Current Value",
-                f"£{latest_val:,.0f}",
-                delta=f"{pct_change:+.1f}% ({selected_filter})"
+            with st.container(key="nw_asset_metric"):
+                st.metric(
+                    "Current Value",
+                    f"£{latest_val:,.0f}",
+                    delta=f"{pct_change:+.1f}% ({selected_filter})"
+                )
+
+            fig = px.line(asset_df, x='Date', y='Value')
+            fig.update_traces(line_color='#378ADD', line_width=2)
+            fig.update_layout(
+                yaxis_tickprefix='£',
+                yaxis_tickformat=',.0f',
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                margin=dict(l=0, r=0, t=10, b=0)
             )
+            fig.update_xaxes(title='')
+            fig.update_yaxes(title='')
+            st.plotly_chart(fig, use_container_width=True)
 
-        fig = px.line(asset_df, x='Date', y='Value')
-        fig.update_traces(line_color='#378ADD', line_width=2)
-        fig.update_layout(
-            yaxis_tickprefix='£',
-            yaxis_tickformat=',.0f',
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            margin=dict(l=0, r=0, t=10, b=0)
-        )
-        fig.update_xaxes(title='')
-        fig.update_yaxes(title='')
-        st.plotly_chart(fig, use_container_width=True)
+        with st.container(border=True, key="card_nw_asset_history"):
+            st.subheader("All Updates")
 
-        st.divider()
-        st.subheader("All Updates")
-
-        history_df = asset_df.sort_values('Date', ascending=False).copy()
-        history_df['Date'] = history_df['Date'].dt.strftime('%d %b %Y, %H:%M')
-        history_df['Value'] = history_df['Value'].apply(lambda v: f"£{v:,.2f}")
-        history_df.columns = ['Recorded', 'Value']
-        st.dataframe(history_df, use_container_width=True, hide_index=True)
-
-        st.divider()
+            history_df = asset_df.sort_values('Date', ascending=False).copy()
+            history_df['Date'] = history_df['Date'].dt.strftime('%d %b %Y, %H:%M')
+            history_df['Value'] = history_df['Value'].apply(lambda v: f"£{v:,.2f}")
+            history_df.columns = ['Recorded', 'Value']
+            st.dataframe(history_df, use_container_width=True, hide_index=True)
 
         with st.expander("Update or Remove This Asset"):
             st.markdown("**Record a new value**")
@@ -328,80 +499,105 @@ elif page == "Net Worth":
             df = df[df['Date'] >= cutoff]
 
         st.caption(f"Showing: {selected_filter}")
-        st.divider()
 
         # --- Total net worth ---
-        # Get total per date by forward-filling each asset's latest known value,
-        # so a day only one asset was updated still counts every other asset's last value
-        df['DateOnly'] = df['Date'].dt.date
-        asset_pivot = df.sort_values('Date').pivot_table(
-            index='DateOnly', columns='Asset', values='Value', aggfunc='last'
-        ).ffill()
-        daily_total = asset_pivot.sum(axis=1).reset_index()
-        daily_total.columns = ['Date', 'Total']
-
-        # Current total and its change over the selected filter period
-        latest_total = daily_total.iloc[-1]['Total'] if not daily_total.empty else 0
-        first_total = daily_total.iloc[0]['Total'] if not daily_total.empty else 0
-        pct_change = ((latest_total - first_total) / first_total * 100) if first_total else 0
-
-        st.markdown(
-            """
-            <style>
-            .st-key-nw_total_metric [data-testid="stMetricValue"] { font-size: 3rem; }
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-        with st.container(key="nw_total_metric"):
-            st.metric(
-                "Current Total Assets",
-                f"£{latest_total:,.0f}",
-                delta=f"{pct_change:+.1f}% ({selected_filter})"
+        with st.container(border=True, key="card_nw_total"):
+            # Full, unfiltered daily total (forward-filled) computed once in
+            # networth.py; the selected time filter is applied to this result,
+            # not to the raw records, so an asset that wasn't updated inside the
+            # filter window still counts using its last known value.
+            full_daily_total = get_total_net_worth_series()
+            daily_total = (
+                full_daily_total[full_daily_total['Date'] >= cutoff.date()]
+                if cutoff else full_daily_total
             )
 
-        st.subheader("Total Assets Over Time")
+            # Current total and its change over the selected filter period
+            latest_total = daily_total.iloc[-1]['Total'] if not daily_total.empty else 0
+            first_total = daily_total.iloc[0]['Total'] if not daily_total.empty else 0
+            pct_change = ((latest_total - first_total) / first_total * 100) if first_total else 0
 
-        fig_total = px.line(
-            daily_total, x='Date', y='Total',
-            labels={'Total': 'Total Assets (£)', 'Date': ''},
-        )
-        fig_total.update_traces(line_color='#1D9E75', line_width=2)
-        fig_total.update_layout(
-            yaxis_tickprefix='£',
-            yaxis_tickformat=',.0f',
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            margin=dict(l=0, r=0, t=0, b=0)
-        )
-        st.plotly_chart(fig_total, use_container_width=True)
+            with st.container(key="nw_total_metric"):
+                st.metric(
+                    "Current Total Assets",
+                    f"£{latest_total:,.0f}",
+                    delta=f"{pct_change:+.1f}% ({selected_filter})"
+                )
 
-        st.divider()
+            st.subheader("Total Assets Over Time")
+
+            fig_total = px.line(
+                daily_total, x='Date', y='Total',
+                labels={'Total': 'Total Assets (£)', 'Date': ''},
+            )
+            fig_total.update_traces(line_color='#1D9E75', line_width=2, name='Actual', showlegend=True)
+            fig_total.update_layout(
+                yaxis_tickprefix='£',
+                yaxis_tickformat=',.0f',
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                margin=dict(l=0, r=0, t=0, b=0)
+            )
+
+            # --- Projected trend line ---
+            # Anchored on the TRUE latest total from full history (via
+            # project_net_worth), never on the filtered daily_total above - the
+            # growth rate and starting point must not depend on which time
+            # filter the user has selected on this page.
+            projection = project_net_worth(years=PROJECTION_YEARS)
+
+            if projection['ok']:
+                anchor_ts = pd.Timestamp(projection['anchor_date'])
+                rate = projection['rate']
+                future_dates = [anchor_ts + pd.DateOffset(years=yr) for yr in range(PROJECTION_YEARS + 1)]
+                future_values = [projection['anchor_value'] * (1 + rate) ** yr for yr in range(PROJECTION_YEARS + 1)]
+
+                fig_total.add_trace(go.Scatter(
+                    x=future_dates, y=future_values,
+                    mode='lines',
+                    line=dict(color='#1D9E75', width=2, dash='dash'),
+                    opacity=0.5,
+                    name=f'Projected ({rate*100:.1f}%/yr)'
+                ))
+
+            st.plotly_chart(fig_total, use_container_width=True)
+
+            if projection['ok']:
+                st.caption(
+                    f"Dashed line: a rough {PROJECTION_YEARS}-year projection based on your full asset "
+                    f"history (independent of the filter buttons above), assuming your historical blended "
+                    f"growth rate of {projection['rate']*100:.1f}%/year continues. This rate reflects both "
+                    f"market performance and your own contributions over time - it is not a pure investment "
+                    f"return, and it is not a guarantee of future results."
+                )
+            else:
+                st.caption("Not enough net worth history yet to show a projection.")
 
         # --- Asset list ---
-        st.subheader("Assets")
-        st.caption("Click an asset to see its full history")
+        with st.container(border=True, key="card_nw_assetlist"):
+            st.subheader("Assets")
+            st.caption("Click an asset to see its full history")
 
-        asset_summary = df.sort_values('Date').groupby('Asset').agg(
-            Value=('Value', 'last'),
-            Tag=('Tag', 'last')
-        ).reset_index().sort_values('Value', ascending=False)
+            asset_summary = df.sort_values('Date').groupby('Asset').agg(
+                Value=('Value', 'last'),
+                Tag=('Tag', 'last')
+            ).reset_index().sort_values('Value', ascending=False)
 
-        header = st.columns([4, 2, 2])
-        header[0].caption("ASSET")
-        header[1].caption("CATEGORY")
-        header[2].caption("VALUE")
+            header = st.columns([4, 2, 2])
+            header[0].caption("ASSET")
+            header[1].caption("CATEGORY")
+            header[2].caption("VALUE")
 
-        for _, row in asset_summary.iterrows():
-            cols = st.columns([4, 2, 2])
-            with cols[0]:
-                if st.button(row['Asset'], key=f"nw_asset_{row['Asset']}", use_container_width=True):
-                    st.session_state.nw_selected_asset = row['Asset']
-                    st.rerun()
-            with cols[1]:
-                st.write(row['Tag'])
-            with cols[2]:
-                st.write(f"£{row['Value']:,.0f}")
+            for _, row in asset_summary.iterrows():
+                cols = st.columns([4, 2, 2])
+                with cols[0]:
+                    if st.button(row['Asset'], key=f"nw_asset_{row['Asset']}", use_container_width=True):
+                        st.session_state.nw_selected_asset = row['Asset']
+                        st.rerun()
+                with cols[1]:
+                    st.write(row['Tag'])
+                with cols[2]:
+                    st.write(f"£{row['Value']:,.0f}")
 
         # Add or remove an asset
         with st.expander("Add or Remove an Asset"):
@@ -442,83 +638,151 @@ elif page == "Net Worth":
             else:
                 st.caption("No assets yet")
 
-# --- Chat Page ---
-elif page == "Chat":
-    st.header("Chat with Budget Bot")
-    st.write("Ask questions about your spending, tell me to fix a category, or update an account balance.")
+# --- Personal Budget Page ---
+elif page == "Personal Budget":
+    st.header("Personal Budget")
 
-    from chat import chat_with_budget_bot, update_category
-    from networth import update_asset_value
+    from budget import (
+        get_personal_items, replace_personal_section, get_personal_total_expenses,
+        get_personal_total_income, set_personal_total_income
+    )
 
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    if "pending_action" not in st.session_state:
-        st.session_state.pending_action = None
-
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.write(message["content"])
-
-    if st.session_state.pending_action:
-        action = st.session_state.pending_action
-        with st.chat_message("assistant"):
-            st.write(action["display"])
-            confirm_col, cancel_col = st.columns(2)
-            with confirm_col:
-                if st.button("Confirm", key="confirm_pending_action", use_container_width=True):
-                    if action["type"] == "update_networth":
-                        update_asset_value(action["asset_name"], action["value"])
-                        result_text = f"Updated {action['asset_name']} to £{action['value']:,.2f}."
-                    else:
-                        count = update_category(action["merchant_name"], action["new_category"])
-                        result_text = f"Updated {count} transaction(s) to {action['new_category']}."
-                    st.session_state.messages.append({"role": "assistant", "content": result_text})
-                    st.session_state.pending_action = None
-                    st.rerun()
-            with cancel_col:
-                if st.button("Cancel", key="cancel_pending_action", use_container_width=True):
-                    st.session_state.messages.append({"role": "assistant", "content": "Okay, no changes made."})
-                    st.session_state.pending_action = None
-                    st.rerun()
-
-    if prompt := st.chat_input("Ask Budget Bot something..."):
-        if st.session_state.pending_action:
-            st.session_state.pending_action = None
-
-        st.session_state.messages.append({
-            "role": "user",
-            "content": prompt
-        })
-
-        with st.chat_message("user"):
-            st.write(prompt)
-
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                result = chat_with_budget_bot(
-                    st.session_state.messages[:-1],
-                    prompt
-                )
-                st.write(result["text"])
-
-        if result["pending_action"]:
-            st.session_state.pending_action = result["pending_action"]
+    with st.container(border=True, key="card_personal_money_in"):
+        st.subheader("Money In")
+        st.caption("Reference only - not summed into any total")
+        money_in_df = pd.DataFrame(get_personal_items('Money In'))
+        if money_in_df.empty:
+            money_in_df = pd.DataFrame(columns=['name', 'amount'])
+        edited_money_in = st.data_editor(
+            money_in_df,
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "name": st.column_config.TextColumn("Name", required=True),
+                "amount": st.column_config.NumberColumn("Amount (£)", min_value=0.0, step=1.0, required=True),
+            },
+            key="personal_money_in_editor"
+        )
+        if st.button("Save Money In", key="save_personal_money_in"):
+            clean_items = edited_money_in.dropna(subset=['name', 'amount']).to_dict('records')
+            replace_personal_section('Money In', clean_items)
+            st.success("Money In saved")
             st.rerun()
-        else:
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": result["text"]
-            })
 
+    with st.container(border=True, key="card_personal_income"):
+        total_income = get_personal_total_income()
+        new_total_income = st.number_input(
+            "Total income (Minus sacrifice) (£)", min_value=0.0, step=1.0,
+            value=total_income, key="personal_total_income_input"
+        )
+        if st.button("Save Total Income", key="save_total_income"):
+            set_personal_total_income(new_total_income)
+            st.success("Saved")
+            st.rerun()
+
+    with st.container(border=True, key="card_personal_money_out"):
+        st.subheader("Money Out")
+        money_out_df = pd.DataFrame(get_personal_items('Money Out'))
+        if money_out_df.empty:
+            money_out_df = pd.DataFrame(columns=['name', 'amount'])
+        edited_money_out = st.data_editor(
+            money_out_df,
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "name": st.column_config.TextColumn("Name", required=True),
+                "amount": st.column_config.NumberColumn("Amount (£)", min_value=0.0, step=1.0, required=True),
+            },
+            key="personal_money_out_editor"
+        )
+        if st.button("Save Money Out", key="save_personal_money_out"):
+            clean_items = edited_money_out.dropna(subset=['name', 'amount']).to_dict('records')
+            replace_personal_section('Money Out', clean_items)
+            st.success("Money Out saved")
+            st.rerun()
+
+    with st.container(border=True, key="card_personal_summary"):
+        st.subheader("Money Left Over")
+        total_expenses = get_personal_total_expenses()
+        income_minus_expenses = total_income - total_expenses
+        money_per_week = income_minus_expenses / 4
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total expenses", f"£{total_expenses:,.2f}")
+        with col2:
+            st.metric("Income minus expenses", f"£{income_minus_expenses:,.2f}")
+        with col3:
+            st.metric("Money per week", f"£{money_per_week:,.2f}")
+
+# --- Household Budget Page ---
+elif page == "Household Budget":
+    st.header("Household Budget")
+
+    from budget import (
+        get_household_items, replace_household_items, get_household_total,
+        get_household_split_percent, set_household_split_percent
+    )
+
+    with st.container(border=True, key="card_household_bills"):
+        st.subheader("Household Bills")
+        household_df = pd.DataFrame(get_household_items())
+        if household_df.empty:
+            household_df = pd.DataFrame(columns=['service', 'provider', 'renewal_date', 'amount'])
+        edited_household = st.data_editor(
+            household_df,
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "service": st.column_config.TextColumn("Service", required=True),
+                "provider": st.column_config.TextColumn("Provider"),
+                "renewal_date": st.column_config.TextColumn("Renewal / end date"),
+                "amount": st.column_config.NumberColumn("New House", min_value=0.0, step=1.0, required=True),
+            },
+            key="household_editor"
+        )
+        if st.button("Save Household Bills", key="save_household_bills"):
+            clean_df = edited_household.dropna(subset=['service', 'amount']).copy()
+            clean_df['provider'] = clean_df['provider'].fillna('')
+            clean_df['renewal_date'] = clean_df['renewal_date'].fillna('')
+            replace_household_items(clean_df.to_dict('records'))
+            st.success("Household bills saved")
+            st.rerun()
+
+        total = get_household_total()
+        st.metric("Total", f"£{total:,.2f}")
+
+    with st.container(border=True, key="card_household_split"):
+        st.subheader("Split")
+        split_pct = st.number_input(
+            "Jonny's share (%)", min_value=0.0, max_value=100.0, step=1.0,
+            value=get_household_split_percent(), key="household_split_input"
+        )
+        if st.button("Save Split %", key="save_split_pct"):
+            set_household_split_percent(split_pct)
+            st.success("Saved")
+            st.rerun()
+
+        jonny_share = total * (split_pct / 100)
+        steph_share = total * (1 - split_pct / 100)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Jonny", f"£{jonny_share:,.2f}")
+        with col2:
+            st.metric("Steph", f"£{steph_share:,.2f}")
 
 # --- View Transactions Page ---
 elif page == "View Transactions":
     st.header("All Transactions")
     
     all_transactions = load_all_transactions()
-    
+
     if all_transactions:
+        from analytics import month_sort_key
+
         df = pd.DataFrame([{
             'Date': t.date,
             'Description': t.description,
@@ -526,14 +790,41 @@ elif page == "View Transactions":
             'Category': t.category,
             'Month': t.month
         } for t in all_transactions])
-        
-        # Filter by month
-        months = sorted(df['Month'].unique().tolist())
-        selected_month = st.selectbox("Filter by month", ["All months"] + months)
-        
+
+        with st.container(border=True, key="card_transactions_filters"):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                months = sorted(df['Month'].unique().tolist(), key=month_sort_key)
+                selected_month = st.selectbox("Filter by month", ["All months"] + months)
+            with col2:
+                merchants = sorted(df['Description'].unique().tolist())
+                selected_merchant = st.selectbox("Filter by merchant", ["All merchants"] + merchants)
+            with col3:
+                categories = sorted(df['Category'].unique().tolist())
+                selected_category = st.selectbox("Filter by category", ["All categories"] + categories)
+
         if selected_month != "All months":
             df = df[df['Month'] == selected_month]
+        if selected_merchant != "All merchants":
+            df = df[df['Description'] == selected_merchant]
+        if selected_category != "All categories":
+            df = df[df['Category'] == selected_category]
 
+        with st.container(border=True, key="card_transactions_table"):
+            st.dataframe(df, use_container_width=True)
+            st.caption(f"Showing {len(df)} transactions")
+    else:
+        st.info("No transactions yet - upload a statement first")
+
+# --- Manage Categories Page ---
+elif page == "Manage Categories":
+    st.header("Manage Categories")
+    st.write("Review and correct how each merchant has been categorised.")
+
+    from database import get_db, Transaction
+    from categoriser import CATEGORIES
+
+    with st.container(border=True, key="card_manage_categorise_actions"):
         col1, col2 = st.columns(2)
         with col1:
             if st.button("Categorise uncategorised"):
@@ -551,86 +842,46 @@ elif page == "View Transactions":
                     db.close()
                     st.success(f"Done. {rules} categorised by rules, {ai} by Ollama")
 
-        st.dataframe(df, use_container_width=True)
-        st.caption(f"Showing {len(df)} transactions")
-    else:
-        st.info("No transactions yet - upload a statement first")
-
-        # --- Upload Page ---
-elif page == "Upload Statement":
-    st.header("Upload Statement")
-    st.write("Upload a bank statement PDF to add it to Budget Bot.")
-    
-    uploaded_file = st.file_uploader("Upload your bank statement", type="pdf")
-    
-    if uploaded_file is not None:
-        pdf = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-        
-        lines = []
-        for page_num in pdf:
-            for line in page_num.get_text().split('\n'):
-                line = line.strip()
-                if line:
-                    lines.append(line)
-
-        transactions = parse_transactions(lines)
-        
-        if transactions:
-            st.success(f"Found {len(transactions)} transactions in this statement")
-            
-            if st.button("Save to Budget Bot"):
-                saved, skipped = save_transactions(transactions)
-                st.success(f"Saved {saved} new transactions. Skipped {skipped} duplicates.")
-        else:
-            st.warning("No transactions found")
-
-# --- Manage Categories Page ---
-elif page == "Manage Categories":
-    st.header("Manage Categories")
-    st.write("Review and correct how each merchant has been categorised.")
-
-    from database import get_db, Transaction
-    from categoriser import CATEGORIES
-
-    db = get_db()
-    merchants = db.query(
-        Transaction.description,
-        Transaction.category
-    ).distinct(Transaction.description).all()
-    db.close()
-
-    merchant_df = pd.DataFrame([{
-        'Merchant': m.description,
-        'Category': m.category
-    } for m in merchants]).sort_values('Merchant')
-
-    st.caption(f"{len(merchant_df)} unique merchants")
-
-    selected_cat = st.selectbox(
-        "Filter by category", 
-        ["All categories"] + CATEGORIES,
-        key="filter_category"
-    )
-
-    if selected_cat != "All categories":
-        merchant_df = merchant_df[merchant_df['Category'] == selected_cat]
-
-    st.dataframe(merchant_df, use_container_width=True)
-
-    st.divider()
-    st.subheader("Correct a category")
-
-    all_merchants = sorted([m.description for m in merchants])
-    selected_merchant = st.selectbox("Select merchant to fix", all_merchants, key="select_merchant")
-    new_category = st.selectbox("Assign correct category", CATEGORIES, key="new_category")
-
-    if st.button("Update category"):
+    with st.container(border=True, key="card_manage_merchant_table"):
         db = get_db()
-        transactions_to_update = db.query(Transaction).filter_by(
-            description=selected_merchant
-        ).all()
-        for t in transactions_to_update:
-            t.category = new_category
-        db.commit()
+        merchants = db.query(
+            Transaction.description,
+            Transaction.category
+        ).distinct(Transaction.description).all()
         db.close()
-        st.success(f"Updated all '{selected_merchant}' transactions to '{new_category}'")
+
+        merchant_df = pd.DataFrame([{
+            'Merchant': m.description,
+            'Category': m.category
+        } for m in merchants]).sort_values('Merchant')
+
+        st.caption(f"{len(merchant_df)} unique merchants")
+
+        selected_cat = st.selectbox(
+            "Filter by category",
+            ["All categories"] + CATEGORIES,
+            key="filter_category"
+        )
+
+        if selected_cat != "All categories":
+            merchant_df = merchant_df[merchant_df['Category'] == selected_cat]
+
+        st.dataframe(merchant_df, use_container_width=True)
+
+    with st.container(border=True, key="card_manage_correct_category"):
+        st.subheader("Correct a category")
+
+        all_merchants = sorted([m.description for m in merchants])
+        selected_merchant = st.selectbox("Select merchant to fix", all_merchants, key="select_merchant")
+        new_category = st.selectbox("Assign correct category", CATEGORIES, key="new_category")
+
+        if st.button("Update category"):
+            db = get_db()
+            transactions_to_update = db.query(Transaction).filter_by(
+                description=selected_merchant
+            ).all()
+            for t in transactions_to_update:
+                t.category = new_category
+            db.commit()
+            db.close()
+            st.success(f"Updated all '{selected_merchant}' transactions to '{new_category}'")
