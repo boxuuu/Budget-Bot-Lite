@@ -134,10 +134,7 @@ important than visual polish, though both have had real investment.
 Ideas raised in conversation, not committed to any stage yet. Resurface these if Jonathan asks
 "what's on the plan" or similar — don't build any of them unprompted.
 
-1. **Subscription audit** — a view listing every recurring/subscription-style charge (Subscriptions
-   category: Claude, iCloud, Patreon, Steam, Microsoft, etc.) with total monthly burn. **Jonathan is
-   actively interested in this one (2026-07-16) — see the expanded version below, currently the most
-   likely next build.**
+1. ~~**Subscription audit**~~ — **built 2026-07-16**, see "Recurring charges checklist, built" below.
 2. **In-month spend pace** — "you've spent £340 of a typical £450 Eating Out month, and it's only the
    12th" — projects the current month's trajectory against historical per-category averages. Lighter
    weight than a formal budget; sidesteps the Stage 8 budget-definition problem entirely.
@@ -150,28 +147,34 @@ Ideas raised in conversation, not committed to any stage yet. Resurface these if
 5. **Backup/export** — a one-click CSV/DB export. `budget_bot.db` is flagged "do not delete" in
    CLAUDE.md but has no backup story; it's a single local file holding years of net worth history.
 
-### Subscription audit, expanded (2026-07-16 discussion)
-Jonathan's specific ask: not just a list of recurring charges, but something that cross-checks against
-the **Personal Budget "Money Out" list** so nothing gets missed in either direction —
-(a) *recurring charges with no matching Personal Budget line* (paying for something he forgot to
-budget for, or forgot he's still paying for at all), and (b) *Personal Budget lines with no recent
-matching transaction* (budgeted for something that's lapsed or been cancelled). This is a
-reconciliation/detection feature (matched vs unmatched), not a numeric budget-vs-actual comparison —
-which sidesteps the Stage 8 mapping-precision problem, since it only needs to answer "does this
-recurring charge appear somewhere in the budget, yes or no," not "is the amount exactly right."
-Several Personal Budget items already map to a specific known merchant/rule in `categoriser.py`
-(BJJ/GYM → gym rules, Phone → Vodafone/Plusnet, SIPP/ISA → AJ Bell/Sippdeal, Claude/iCloud →
-subscription rules), which is a more precise anchor than category-level matching. Not yet designed in
-detail or built — next step if Jonathan wants to proceed is nailing down what counts as "recurring"
-(e.g. appeared in ≥2 of the last 3 months) and how fuzzy the budget-item-to-merchant match should be.
+### Recurring charges checklist, built (2026-07-16)
+Jonathan's real concern turned out to be narrower and more actionable than a full subscription audit:
+the Personal Budget page's "Total expenses" is purely manual (a sum of the Money Out grid) with no
+connection to real transactions, so it could never reveal spending he'd forgotten to budget for.
+Built, rather than the originally-discussed auto-matching approach (matching budget line names like
+"BJJ / GYM" to specific merchants like "Empire Grappling" was judged too fragile to trust — see the
+parked Stage 8 discussion above for the same concern applied to Household Budget):
+- **A real "Actual monthly spend" figure** (`analytics.calculate_avg_monthly_spend`) shown next to
+  the manual "Total expenses" on the Personal Budget page, with an inverse-coloured delta — the gap
+  is visible as a number with zero matching required.
+- **A Recurring Charges card** (`analytics.get_recurring_charges`: merchants paid in ≥2 of the last 3
+  months) listing each with Add to budget / Already in budget / Not recurring actions. No
+  budget-item-to-merchant auto-matching — Jonathan compares the list against his own Money Out grid
+  by eye, same principle as the parked Stage 8 decision.
+- **Dismissals expire after 6 months** (`budget.RecurringChargeDismissal`, `DISMISSAL_EXPIRY_DAYS`)
+  rather than hiding a merchant forever — explicitly requested by Jonathan, who didn't want to risk
+  silently losing track of something he'd waved off once. Dismissed items sit in a collapsed
+  "Reviewed" expander (with Un-dismiss) rather than disappearing outright.
+- The "Actual monthly spend" figure is never affected by dismissals — it's always the true total,
+  dismissing only declutters the checklist.
 
 ## 7. Progress
 
 **~95% complete** on the original 8-stage plan. Stage 7 fully done and pushed. Stage 8 has one
 concrete win (Dashboard trend chart split into Spending vs Savings lines) and one deliberately
-deferred decision (budget targets vs actuals — Jonathan is happy with raw data access instead, see
-Known Issues). Separately, a new feature (subscription audit) is now under active discussion —
-see Suggested Features above.
+parked decision (budget targets vs actuals — Jonathan is happy with raw data access instead, see
+Known Issues). Separately, outside the original 8 stages: the recurring-charges checklist (Suggested
+Features above) is built and verified in the real app, not yet pushed.
 
 ## 8. Known Issues
 
@@ -280,6 +283,25 @@ immediate action. Of those, he's actively interested in the subscription audit i
 expanded into a two-way reconciliation against the Personal Budget "Money Out" list (catch charges
 missing from the budget, and budget lines that have lapsed) — recorded in detail under Suggested
 Features; not yet designed in full or built.
+
+### 2026-07-16 (continued) — Recurring charges checklist built
+Designed and built the recurring-charges feature from the brainstorm above, narrowed down through
+conversation to Jonathan's actual concern: "my personal budget doesn't show my full spend." Talked
+through the household-bills itemisation gap found earlier as a reason *not* to attempt auto-matching
+budget items to specific merchants (same fragility, different page), landing on a simpler design: a
+real "Actual monthly spend" figure computed from transactions next to the manual budgeted total
+(closes the "how do I even see the gap" problem with zero matching), plus a Recurring Charges
+checklist (merchants paid in ≥2 of the last 3 months) that Jonathan reviews and actions himself rather
+than the app guessing. Added dismissal ("Already in budget" / "Not recurring") after Jonathan flagged
+a real risk: a silent permanent dismiss could bury something and he'd never know to re-check it.
+Agreed dismissals expire after 6 months rather than lasting forever, and dismissed items stay visible
+in a collapsed "Reviewed" section (with Un-dismiss) rather than disappearing outright — nothing is
+ever fully hidden. Built (`analytics.calculate_avg_monthly_spend`, `analytics.get_recurring_charges`,
+`budget.RecurringChargeDismissal` + supporting functions, Personal Budget page UI), then verified live
+in the browser: added a real recurring merchant to the budget and confirmed the write persisted,
+dismissed another and confirmed it moved to Reviewed with today's date, un-dismissed it and confirmed
+the dismissal table was empty again. Test data cleaned up afterward so Jonathan's real budget/database
+weren't left with test artifacts. Committed (not yet pushed).
 
 ---
 
