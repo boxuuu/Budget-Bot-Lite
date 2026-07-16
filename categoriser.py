@@ -64,6 +64,7 @@ KNOWN_RULES = {
     "itv": "Subscriptions",
     "paypal": "Subscriptions",
     "aj bell": "Savings & Investments",
+    "a j bell": "Savings & Investments",
     "sippdeal": "Savings & Investments",
     "sprive": "Savings & Investments",
     "jetts": "Health & Fitness",
@@ -96,6 +97,13 @@ KNOWN_RULES = {
     "hmv": "Shopping",
     "ao.com": "Shopping",
     "flexispot": "Shopping",
+    # What the cash was actually spent on is unknowable from the
+    # transaction alone - "Other" is the honest answer here, not a
+    # categoriser failure. Description includes the withdrawal location
+    # (e.g. "Cash withdrawal, E, LEIGH, WN7 1QX"), so without this rule
+    # every branch/location produces a distinct "unique merchant" that
+    # burns a separate Ollama + web search call for the same non-answer.
+    "cash withdrawal": "Other",
 }
 
 def apply_known_rules(merchant_name):
@@ -119,18 +127,29 @@ def get_merchant_context(merchant_name, all_transactions):
 def search_merchant_web(merchant_name):
     """Look up a merchant online to help the categoriser figure out what
     kind of business it is. Returns "" (same as no context) on any failure -
-    the caller doesn't need to know whether the search worked."""
+    the caller doesn't need to know whether the search worked.
+
+    Queries avoid the words "UK company", which reliably rank Companies
+    House registration pages first - those only confirm a business exists,
+    never what it actually does (a pub named "Overdraught" turned up nothing
+    but Companies House boilerplate under the old query). Leading with a
+    Manchester-anchored query instead favours local review/listing results.
+    Any Companies House snippet that still slips through is filtered out."""
     from ddgs import DDGS
 
     queries = [
-        f"{merchant_name} UK company what type of business",
-        f"{merchant_name} company"
+        f"{merchant_name} Manchester",
+        f"{merchant_name} what kind of business",
     ]
 
     for query in queries:
         try:
             results = DDGS().text(query, max_results=3)
-            snippets = " ".join(r.get('body', '') for r in results[:2])
+            useful = [
+                r.get('body', '') for r in results
+                if 'companies house' not in r.get('body', '').lower()
+            ]
+            snippets = " ".join(useful[:2])
             if snippets:
                 print(f"  [web] {merchant_name} -> found")
                 return snippets[:400].replace('\n', ' ')
