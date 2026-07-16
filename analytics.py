@@ -84,3 +84,47 @@ def calculate_savings_rate(transactions):
         'max_savings': max_savings,
         'savings_rate': savings_rate,
     }
+
+def calculate_avg_monthly_spend(transactions):
+    """Real average monthly outflow: gross spend, excluding Savings &
+    Investments (saved, not spent) - same definition as the Dashboard
+    trend chart's "Spending" line. Salary needs no explicit exclusion since
+    it's income only and never has a negative amount. 0 if there's no
+    spending data."""
+    by_month = defaultdict(float)
+    for t in transactions:
+        if t.amount < 0 and t.category != 'Savings & Investments':
+            by_month[t.month] += abs(t.amount)
+    return sum(by_month.values()) / len(by_month) if by_month else 0
+
+def get_recurring_charges(transactions, min_months=2, window_months=3):
+    """Merchants with a real outflow (excluding Savings & Investments) in
+    at least `min_months` of the most recent `window_months` months of
+    data - a simple, robust definition of "recurring" that tolerates a
+    subscription's amount or exact day shifting slightly, unlike matching
+    on exact amount. Used to surface bills/subscriptions that may be
+    missing from the Personal Budget's Money Out list. Returns a list of
+    {merchant, category, months_seen, avg_amount} dicts, sorted by
+    avg_amount descending."""
+    months_sorted = sorted({t.month for t in transactions}, key=month_sort_key)
+    recent_months = set(months_sorted[-window_months:])
+
+    by_merchant = defaultdict(lambda: {'category': '', 'months': set(), 'amounts': []})
+    for t in transactions:
+        if t.amount < 0 and t.category != 'Savings & Investments' and t.month in recent_months:
+            entry = by_merchant[t.description]
+            entry['category'] = t.category
+            entry['months'].add(t.month)
+            entry['amounts'].append(abs(t.amount))
+
+    recurring = [
+        {
+            'merchant': merchant,
+            'category': data['category'],
+            'months_seen': len(data['months']),
+            'avg_amount': sum(data['amounts']) / len(data['amounts']),
+        }
+        for merchant, data in by_merchant.items()
+        if len(data['months']) >= min_months
+    ]
+    return sorted(recurring, key=lambda x: x['avg_amount'], reverse=True)

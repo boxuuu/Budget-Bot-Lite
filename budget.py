@@ -1,5 +1,6 @@
-from sqlalchemy import create_engine, Column, String, Float, Integer
+from sqlalchemy import create_engine, Column, String, Float, Integer, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
+from datetime import datetime, timedelta
 
 Base = declarative_base()
 
@@ -26,11 +27,60 @@ class BudgetSetting(Base):
     key = Column(String, primary_key=True)
     value = Column(String)
 
+class RecurringChargeDismissal(Base):
+    """A merchant the user has told the Recurring Charges checklist to stop
+    nagging about - either because it's already covered by a differently
+    named Money Out row, or because it isn't really a regular bill despite
+    hitting the recurrence threshold. Expires automatically (see
+    DISMISSAL_EXPIRY_DAYS) rather than hiding a merchant forever, so a
+    subscription that crept back up or restarted doesn't stay silently
+    buried just because it was waved off once."""
+    __tablename__ = 'recurring_charge_dismissals'
+
+    id = Column(Integer, primary_key=True)
+    merchant = Column(String)
+    reason = Column(String)   # 'already_budgeted' or 'not_recurring'
+    dismissed_at = Column(DateTime)
+
+DISMISSAL_EXPIRY_DAYS = 180
+
 def get_budget_db():
     engine = create_engine('sqlite:///budget_bot.db')
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     return Session()
+
+def get_active_dismissals():
+    """Merchant -> {'reason', 'dismissed_at'} for dismissals still within
+    their expiry window. Expired rows aren't deleted, they just stop being
+    "active" - so the merchant naturally resurfaces in the Recurring
+    Charges list, and dismissing it again simply refreshes dismissed_at
+    rather than needing a new row."""
+    db = get_budget_db()
+    cutoff = datetime.utcnow() - timedelta(days=DISMISSAL_EXPIRY_DAYS)
+    rows = db.query(RecurringChargeDismissal).filter(
+        RecurringChargeDismissal.dismissed_at >= cutoff
+    ).all()
+    result = {r.merchant: {'reason': r.reason, 'dismissed_at': r.dismissed_at} for r in rows}
+    db.close()
+    return result
+
+def dismiss_recurring_charge(merchant, reason):
+    db = get_budget_db()
+    existing = db.query(RecurringChargeDismissal).filter_by(merchant=merchant).first()
+    if existing:
+        existing.reason = reason
+        existing.dismissed_at = datetime.utcnow()
+    else:
+        db.add(RecurringChargeDismissal(merchant=merchant, reason=reason, dismissed_at=datetime.utcnow()))
+    db.commit()
+    db.close()
+
+def undismiss_recurring_charge(merchant):
+    db = get_budget_db()
+    db.query(RecurringChargeDismissal).filter_by(merchant=merchant).delete()
+    db.commit()
+    db.close()
 
 def get_personal_items(section):
     db = get_budget_db()

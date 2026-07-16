@@ -735,13 +735,103 @@ elif page == "Personal Budget":
         income_minus_expenses = total_income - total_expenses
         money_per_week = income_minus_expenses / 4
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("Total expenses", f"£{total_expenses:,.2f}")
         with col2:
             st.metric("Income minus expenses", f"£{income_minus_expenses:,.2f}")
         with col3:
             st.metric("Money per week", f"£{money_per_week:,.2f}")
+        with col4:
+            from analytics import calculate_avg_monthly_spend
+            from database import load_all_transactions
+            actual_spend = calculate_avg_monthly_spend(load_all_transactions())
+            gap = actual_spend - total_expenses
+            st.metric(
+                "Actual monthly spend (recent avg)",
+                f"£{actual_spend:,.2f}",
+                delta=f"£{gap:,.2f} vs budget",
+                delta_color="inverse",
+                help="Real average monthly outflow from your transactions, excluding Savings & "
+                     "Investments. If this is higher than Total expenses, something you're "
+                     "actually paying for isn't reflected in the Money Out list below - see "
+                     "Recurring Charges."
+            )
+
+    with st.container(border=True, key="card_personal_recurring"):
+        st.subheader("Recurring Charges (last 3 months)")
+        st.caption(
+            "Merchants you've paid at least twice in the last 3 months, with their average "
+            "amount. This isn't matched against your Money Out list above - compare it yourself. "
+            "\"Add to budget\" adds it and marks it reviewed; \"Already in budget\" / \"Not "
+            "recurring\" just mark it reviewed. Reviewed items move below for 6 months, then "
+            "resurface automatically - nothing gets permanently hidden."
+        )
+
+        from analytics import get_recurring_charges
+        from database import load_all_transactions
+        from categoriser import CATEGORIES
+        from budget import get_active_dismissals, dismiss_recurring_charge, undismiss_recurring_charge
+
+        all_recurring = get_recurring_charges(load_all_transactions())
+        dismissals = get_active_dismissals()
+
+        recurring_cat_filter = st.selectbox(
+            "Filter by category", ["All categories"] + CATEGORIES, key="recurring_category_filter"
+        )
+        if recurring_cat_filter != "All categories":
+            all_recurring = [r for r in all_recurring if r['category'] == recurring_cat_filter]
+
+        to_review = [r for r in all_recurring if r['merchant'] not in dismissals]
+        reviewed = [r for r in all_recurring if r['merchant'] in dismissals]
+
+        if not to_review:
+            st.write("Nothing to review for this filter.")
+        else:
+            header = st.columns([2.6, 1.6, 0.9, 1.1, 1.1, 1.6, 1.6])
+            for col, label in zip(header, ["**Merchant**", "**Category**", "**Months**", "**Avg**", "", "", ""]):
+                col.markdown(label)
+
+            for r in to_review:
+                row = st.columns([2.6, 1.6, 0.9, 1.1, 1.1, 1.6, 1.6])
+                row[0].write(r['merchant'])
+                row[1].write(r['category'])
+                row[2].write(f"{r['months_seen']}/3")
+                row[3].write(f"£{r['avg_amount']:,.2f}")
+                if row[4].button("Add", key=f"add_{r['merchant']}", help="Add to Money Out below"):
+                    current_items = get_personal_items('Money Out')
+                    current_items.append({'name': r['merchant'], 'amount': round(r['avg_amount'], 2)})
+                    replace_personal_section('Money Out', current_items)
+                    dismiss_recurring_charge(r['merchant'], 'already_budgeted')
+                    st.success(f"Added '{r['merchant']}' to Money Out")
+                    st.rerun()
+                if row[5].button(
+                    "In budget", key=f"inbudget_{r['merchant']}",
+                    help="Already covered by an existing (differently named) Money Out row"
+                ):
+                    dismiss_recurring_charge(r['merchant'], 'already_budgeted')
+                    st.rerun()
+                if row[6].button(
+                    "Not recurring", key=f"notrec_{r['merchant']}",
+                    help="Not really a regular bill or subscription"
+                ):
+                    dismiss_recurring_charge(r['merchant'], 'not_recurring')
+                    st.rerun()
+
+        if reviewed:
+            with st.expander(f"Reviewed ({len(reviewed)}) - resurfaces automatically after 6 months"):
+                for r in reviewed:
+                    info = dismissals[r['merchant']]
+                    reason_label = "Already in budget" if info['reason'] == 'already_budgeted' else "Not recurring"
+                    dismissed_date = info['dismissed_at'].strftime('%d %b %Y')
+                    rcol = st.columns([2.6, 1.6, 1.1, 2, 1.6])
+                    rcol[0].write(r['merchant'])
+                    rcol[1].write(r['category'])
+                    rcol[2].write(f"£{r['avg_amount']:,.2f}")
+                    rcol[3].write(f"{reason_label} · {dismissed_date}")
+                    if rcol[4].button("Un-dismiss", key=f"undismiss_{r['merchant']}"):
+                        undismiss_recurring_charge(r['merchant'])
+                        st.rerun()
 
 # --- Household Budget Page ---
 elif page == "Household Budget":
