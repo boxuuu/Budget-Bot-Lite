@@ -172,28 +172,32 @@ def project_net_worth(years=5, asset_names=None, series=None):
     projects that subset (e.g. just pensions + ISA) rather than everything.
     Returns a dict:
       ok, reason ('no_data' | 'insufficient_history' | None),
-      anchor_date, anchor_value, projected_value, rate, span_days, years"""
+      anchor_date, anchor_value, projected_value, rate, span_days, years,
+      start_date (the actual first data point the growth rate was computed
+      from - NOT the same as anchor_date, which is the most recent point the
+      projection starts FROM)"""
     if series is None:
         series = get_total_net_worth_series(asset_names=asset_names)
 
     if series.empty:
         return {'ok': False, 'reason': 'no_data', 'anchor_date': None,
                 'anchor_value': None, 'projected_value': None,
-                'rate': None, 'span_days': 0, 'years': years}
+                'rate': None, 'span_days': 0, 'years': years, 'start_date': None}
 
     rate, span_days = calculate_growth_rate(series)
     anchor_row = series.iloc[-1]
     anchor_date, anchor_value = anchor_row['Date'], anchor_row['Total']
+    start_date = series.iloc[0]['Date']
 
     if rate is None:
         return {'ok': False, 'reason': 'insufficient_history', 'anchor_date': anchor_date,
                 'anchor_value': anchor_value, 'projected_value': None,
-                'rate': None, 'span_days': span_days, 'years': years}
+                'rate': None, 'span_days': span_days, 'years': years, 'start_date': start_date}
 
     projected_value = anchor_value * (1 + rate) ** years
     return {'ok': True, 'reason': None, 'anchor_date': anchor_date,
             'anchor_value': anchor_value, 'projected_value': projected_value,
-            'rate': rate, 'span_days': span_days, 'years': years}
+            'rate': rate, 'span_days': span_days, 'years': years, 'start_date': start_date}
 
 def update_asset_value(asset_name, value, tag=None):
     db = get_networth_db()

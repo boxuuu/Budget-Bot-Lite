@@ -185,7 +185,22 @@ Features above) is built and verified in the real app, not yet pushed.
 - **Net worth projections can look extreme**: the growth rate is blended (market performance +
   Jonathan's own contributions, not a pure investment return), so long-horizon projections can produce
   very large, headline-grabbing figures. Caveated in the UI/chat text, but worth remembering when
-  reading them.
+  reading them. Fixed a real bug in this text 2026-07-16: `chat.py` was labelling the projection as
+  "history since {anchor_date}" using the *end* of the history window (today) instead of the actual
+  start — made a genuine ~2-year blended rate (Aug 2024 → Jul 2026, £92k → £207k) look like it came
+  from almost no data. `networth.project_net_worth()` now also returns `start_date`; the chat message
+  correctly reads "history from {start_date} to {anchor_date}".
+- **Pension transfer in the net worth history (Mar 2025), confirmed harmless to the total**:
+  Jonathan moved ~£12.8k from Workplace Pension (L&G) to Private Pension (AJ Bell, +£14.9k) around
+  19–28 Mar 2025 — a one-off, won't recur. Verified 2026-07-16 this does NOT distort the total net
+  worth growth rate: the Total series shows a normal change across those dates (£130,839 →
+  £133,090, no artifact), and `calculate_growth_rate()` only ever compares the very first and very
+  last data points anyway, so a mid-series event structurally can't move it. It DOES distort
+  per-asset numbers if either pension is ever projected individually rather than as part of the
+  total — currently Workplace Pension shows 89.8%/year and Private Pension 18.6%/year, partly
+  reflecting this transfer rather than pure growth. No code change made (would need a way to tag a
+  specific value change as "transfer, exclude from growth rate," which doesn't exist) — revisit only
+  if per-asset projections become something Jonathan actually uses regularly.
 - **PDF parser scope**: tuned specifically for Chase UK statement format — pre-existing, documented
   limitation, not something to fix unless a new statement format needs supporting.
 - **Savings & Investments netting scope**: applies to the Savings Rate KPI, Chat's context, and (as of
@@ -205,13 +220,12 @@ Features above) is built and verified in the real app, not yet pushed.
 
 ## 9. Next Actions
 
-1. **Design and build the expanded subscription audit** — cross-check recurring charges against the
-   Personal Budget "Money Out" list in both directions (charges missing from the budget, budget lines
-   with no recent matching charge). See "Subscription audit, expanded" under Suggested Features above
-   for what's already been discussed; next step is nailing down the "recurring" and match-fuzziness
-   definitions with Jonathan before writing code.
-2. Resurface the other four Suggested Features ideas if Jonathan asks what's on the plan — none are
-   committed to yet.
+1. Nothing currently blocking. The recurring-charges checklist is built and verified; the chat
+   projection date bug is fixed. Resurface the four remaining Suggested Features ideas (§6) if
+   Jonathan asks what's on the plan — none are committed to yet.
+2. *(Low priority, only if it comes up)* If Jonathan starts using per-pension projections regularly,
+   revisit the Mar 2025 pension-transfer distortion noted in Known Issues — would need a way to tag a
+   specific asset-value change as "transfer" so it's excluded from that asset's growth rate.
 
 ## 10. Session Log
 
@@ -302,6 +316,30 @@ in the browser: added a real recurring merchant to the budget and confirmed the 
 dismissed another and confirmed it moved to Reviewed with today's date, un-dismissed it and confirmed
 the dismissal table was empty again. Test data cleaned up afterward so Jonathan's real budget/database
 weren't left with test artifacts. Committed (not yet pushed).
+
+### 2026-07-16 (continued) — Net worth projection bug fix, pension transfer investigated
+Jonathan questioned a chat projection ("£1,093,218 by 2030" from a stated "growing at 51.5%/year") -
+found and fixed a real bug: `chat.py`'s projection message said "history since {anchor_date}" but
+`anchor_date` is the *end* of the history window (today), not the start, so it wrongly implied the
+51.5%/year rate came from almost no data when the real window is Aug 2024 → Jul 2026 (~2 years, £92k
+→ £207k). `networth.project_net_worth()` now returns `start_date` too; message fixed to read "history
+from {start_date} to {anchor_date}". The £1,093,218 figure itself was always correct arithmetic - only
+the explanation was wrong. Verified the fix by simulating the corrected message text directly (didn't
+re-launch the full chat UI for this one, since the fix is a pure string/data-plumbing change already
+confirmed correct via `project_net_worth()`'s output).
+
+Separately, Jonathan flagged that Workplace Pension and Private Pension both show a big one-off
+dip/spike around Mar 2025 - a real pension transfer between the two, won't recur. Investigated whether
+this inflates the total net worth growth rate used in projections: confirmed it does NOT (the Total
+series shows a normal, non-distorted change across those dates, and the growth-rate calc only ever
+compares the very first and very last data points, nowhere near Mar 2025) - but it DOES distort each
+pension's *individual* growth rate if ever projected separately (Workplace Pension 89.8%/year, Private
+Pension 18.6%/year, both partly reflecting the transfer rather than pure growth/contributions). No
+code change made for this - documented in Known Issues as something to revisit only if per-asset
+projections become a regular ask.
+
+Jonathan ended the session here - PLAN.md updated and everything committed locally
+(`chat.py`/`networth.py` projection fix), not yet pushed to `origin/main`.
 
 ---
 

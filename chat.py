@@ -497,13 +497,16 @@ def chat_with_budget_bot(messages, user_message):
             return {"text": text, "pending_action": None}
 
         text = (
-            f"Based on {scope_text}'s history since {result['anchor_date']:%b %Y} "
-            f"(£{result['anchor_value']:,.0f} now, growing at roughly {result['rate']*100:.1f}%/year), "
-            f"a rough projection puts you at about £{result['projected_value']:,.0f} in {years} years.\n\n"
+            f"Based on {scope_text}'s history from {result['start_date']:%b %Y} to "
+            f"{result['anchor_date']:%b %Y} (£{result['anchor_value']:,.0f} now, growing at roughly "
+            f"{result['rate']*100:.1f}%/year over that period), a rough projection puts you at about "
+            f"£{result['projected_value']:,.0f} in {years} years.\n\n"
             f"Worth flagging: that growth rate is blended - it includes both market performance "
             f"and whatever you've personally added to your accounts over that period, not a pure "
-            f"investment return. It's a straight-line projection from the past, not a guarantee - "
-            f"markets and your own saving habits can both change."
+            f"investment return, so it can look much higher than realistic long-term investment "
+            f"growth if that period included a lot of active saving. It's a straight-line "
+            f"projection from the past, not a guarantee - markets and your own saving habits can "
+            f"both change."
         )
         return {"text": text, "pending_action": None}
 
