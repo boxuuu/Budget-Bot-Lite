@@ -18,6 +18,11 @@ SAVINGS_POT_NAMES = ['fun money', 'round up', 'emergency fund', 'wedding', 'over
 def is_savings_transfer(description):
     return any(pot in description.lower() for pot in SAVINGS_POT_NAMES)
 
+def format_gbp(amount, decimals=2):
+    """£123.45 for positive/zero, -£123.45 (not £-123.45) for negative -
+    needed since Savings & Investments figures can be net-negative."""
+    return f"-£{abs(amount):,.{decimals}f}" if amount < 0 else f"£{amount:,.{decimals}f}"
+
 def net_spend_amount(amount, description):
     """How much a transaction contributes to a spend/category total: the
     full amount for a real outflow; for money returning from one of

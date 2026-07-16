@@ -47,8 +47,8 @@ important than visual polish, though both have had real investment.
 | 4. Dashboard & Analytics | Complete |
 | 5. AI Chat Assistant | Complete |
 | 6. UI/UX Redesign | Complete |
-| 7. Data Accuracy Refinements | Complete (git commit pending) |
-| 8. Budget Targets & Comparisons | Not Started |
+| 7. Data Accuracy Refinements | Complete |
+| 8. Budget Targets & Comparisons | Partially started (see below) |
 
 ## 5. Detailed Checklist
 
@@ -107,18 +107,27 @@ important than visual polish, though both have had real investment.
       moving back out of a pot reduces the savings figure instead of being invisible
 - [x] Fixed negative-currency formatting in chat context (was rendering `£-1,461`, now `-£1,461`)
 - [x] Real database re-categorised with the new rules (verified: 6 Salary rows, 0 Uncategorised)
-- [ ] Commit today's changes to git (`analytics.py`, `categoriser.py`, `chat.py` are currently
-      modified but uncommitted)
+- [x] Committed and pushed (2026-07-16)
 
-### Stage 8 — Budget Targets & Comparisons (not started)
-- [ ] Budget targets vs actuals on the Dashboard
-- [ ] Month-on-month comparison charts
+### Stage 8 — Budget Targets & Comparisons
+- [ ] **Budget targets vs actuals on the Dashboard — deferred, revisit when Jonathan wants it.**
+      Investigated 2026-07-16: Personal/Household Budget line items are free-text bill names
+      ("House", "BJJ / GYM", "Claude", "SIPP", "Mortgage", "Council Tax"...), not the 15 transaction
+      categories — there's no clean 1:1 mapping to compare against. Two real options surfaced:
+      (a) total-level only (one combined budgeted total vs actual total spend/month, no mapping
+      needed), or (b) per-category with a manual category tag added to each budget line item
+      (more granular, more upkeep). Jonathan wants to defer this decision rather than pick now —
+      **raise it again periodically rather than silently building either option.**
+- [x] Month-on-month comparison: Dashboard's trend chart is now two lines, Spending vs
+      Savings & Investments (see Session Log 2026-07-16 below) — this was the practical
+      "month-on-month" need that came up, may or may not fully close this checklist item depending
+      on what else Jonathan has in mind for it.
 
 ## 6. Progress
 
-**~92% complete** (35 of 38 checklist items done). The only fully unstarted stage is budget
-targets/comparisons (Stage 8); everything else is built and verified. The one open item elsewhere is
-committing today's uncommitted changes (Stage 7).
+**~95% complete.** Stage 7 fully done and pushed. Stage 8 has one concrete win (Dashboard trend
+chart split into Spending vs Savings lines) and one deliberately deferred decision (budget
+targets vs actuals — needs Jonathan's input on scope, see checklist above).
 
 ## 7. Known Issues
 
@@ -130,31 +139,27 @@ committing today's uncommitted changes (Stage 7).
   Jonathan's own contributions, not a pure investment return), so long-horizon projections can produce
   very large, headline-grabbing figures. Caveated in the UI/chat text, but worth remembering when
   reading them.
-- **Cosmetic currency formatting**: Dashboard's Savings Rate tile still renders negative values as
-  `£-1,461/mo` instead of `-£1,461/mo` — fixed in `chat.py` during the Stage 7 refinement but
-  deliberately not touched in `app.py` (out of scope for that change). Trivial one-line fix whenever
-  it's worth doing.
-- **Uncommitted changes**: `analytics.py`, `categoriser.py`, and `chat.py` have real, verified changes
-  from today (2026-07-16) not yet committed to git.
 - **PDF parser scope**: tuned specifically for Chase UK statement format — pre-existing, documented
   limitation, not something to fix unless a new statement format needs supporting.
-- **Savings & Investments netting scope**: deliberately does *not* apply to Dashboard's general
-  spending views (Total Spent, pie chart, trend line, top merchants) — only to the Savings Rate figure
-  specifically. This was a considered design decision (applying it more broadly breaks the pie chart,
-  which can't render a negative slice, and would make "Total Spent" misleadingly drop), not an
-  oversight — but worth knowing if the numbers ever look inconsistent between the Dashboard and Chat.
+- **Savings & Investments netting scope**: applies to the Savings Rate KPI, Chat's context, and (as of
+  2026-07-16) the Dashboard trend chart's "Savings & Investments" line — but deliberately *not* to the
+  Dashboard's other general spending views (Total Spent, pie chart, top merchants), which stay
+  gross/unmodified by design (netting would break the pie chart, which can't render a negative slice,
+  and would misrepresent "Total Spent"). Worth knowing if numbers ever look inconsistent across the
+  Dashboard.
+- **Savings Rate can be genuinely negative**: currently -£1,561/mo (-41% of salary) because Mar–Jun
+  2026 each had net withdrawals from savings pots exceeding contributions. Confirmed with Jonathan
+  2026-07-16 that this is correct/expected, not a bug — pots draining is real signal worth seeing, not
+  something to hide behind a flat/always-positive percentage.
+- **Budget targets vs actuals scope undecided**: see Stage 8 checklist above — deferred until Jonathan
+  picks total-level vs per-category. Ask again periodically rather than assuming.
 
 ## 8. Next Actions
 
-1. **Commit and push today's Stage 7 changes** (Salary category, savings-pot netting) — currently
-   sitting uncommitted in the working tree.
-2. **Build budget targets vs actuals on the Dashboard** (Stage 8) — compare Personal/Household Budget
-   figures against real transaction spend per category.
-3. **Build month-on-month comparison charts** (Stage 8).
-4. *(Minor)* Fix the cosmetic negative-currency formatting on the Dashboard's Savings Rate tile to
-   match the fix already made in `chat.py`.
-5. *(Deferred decision, revisit if it comes up)* Decide whether Dashboard's general spending views
-   should ever reflect savings-pot netting, now that the Chat/Savings Rate figure does.
+1. **Revisit budget targets vs actuals** (Stage 8) — check in periodically on whether Jonathan wants
+   total-level or per-category, then build it.
+2. Nothing else currently blocking — Stage 7 is shipped, the trend-chart split is done and verified in
+   a real browser. Next likely work is whatever Jonathan raises next session.
 
 ## 9. Session Log
 
@@ -180,6 +185,27 @@ Chat's context — deliberately *not* to the Dashboard's general spending views,
 broken the pie chart and misrepresented "Total Spent". Verified the real database re-categorised
 correctly (6 Salary rows, exact net savings figures matching hand-calculated expectations). Created
 this PLAN.md file for cross-session context tracking.
+
+### 2026-07-16 (continued) — Dashboard trend chart split, Stage 8 scoping
+Committed and pushed the Stage 7 changes above. Fixed the cosmetic negative-currency formatting on
+the Dashboard's Savings Rate tile (moved `format_gbp` out of `chat.py` into `analytics.py` as a
+shared helper, now used by both). Looked into Stage 8's "budget targets vs actuals" and found budget
+line items (House, BJJ/GYM, SIPP, Mortgage...) don't map cleanly onto the 15 transaction categories —
+flagged this to Jonathan, who chose to defer the decision rather than pick a mapping approach now;
+documented as an open question to revisit periodically rather than a build task.
+
+Separately, Jonathan noticed the Dashboard's Monthly Spending Trend was showing money moving into
+savings pots (SIPP, ISA, Fun Money, etc.) as if it were spending — April looked like £15,866 "spent"
+when £8,995 of that was actually a savings transfer. Split the chart into two lines: "Spending"
+(gross, excludes Savings & Investments category entirely) and "Savings & Investments" (reuses the
+same netted-by-month figures as the Savings Rate KPI, so it can legitimately dip below zero).
+Validated the two-line colour pair with the dataviz skill's palette validator (CVD-safe, all checks
+pass), then actually launched the app (installed Playwright + Chromium into the venv, since neither
+was previously available) and screenshotted the real rendered chart to confirm the fix — April's
+green Spending line now peaks around £6,500 instead of £15k, and the blue Savings line visibly dips
+negative from March, matching the real net-withdrawal data. Also confirmed with Jonathan that the
+Savings Rate KPI's current negative value (-41% of salary) is accurate, not a bug — pots have
+genuinely been net-draining since March.
 
 ---
 

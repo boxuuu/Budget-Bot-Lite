@@ -172,7 +172,7 @@ if page == "Dashboard":
     else:
         import plotly.express as px
         from datetime import datetime, timedelta
-        from analytics import month_sort_key, calculate_savings_rate
+        from analytics import month_sort_key, calculate_savings_rate, format_gbp
         from networth import get_total_net_worth_series
 
         df = pd.DataFrame([{
@@ -214,7 +214,7 @@ if page == "Dashboard":
                 if savings_info['typical_monthly_income']:
                     st.metric(
                         "Savings Rate",
-                        f"£{savings_info['avg_savings']:,.0f}/mo",
+                        f"{format_gbp(savings_info['avg_savings'], decimals=0)}/mo",
                         delta=f"{savings_info['savings_rate']:.0f}% of salary"
                     )
                 else:
@@ -274,20 +274,46 @@ if page == "Dashboard":
 
         # --- Month by Month Trend ---
         with st.container(border=True, key="card_dashboard_trend"):
-            st.subheader("Monthly Spending Trend")
+            st.subheader("Monthly Spending & Savings Trend")
+            st.caption(
+                "Money moving into savings/investment pots (SIPP, ISA, Fun Money, etc.) is saved, "
+                "not spent - it's shown as its own line rather than inflating Spending. The Savings "
+                "line nets out withdrawals, so it can dip below zero in a month where more came out "
+                "of a pot than went in."
+            )
 
-            monthly_totals = spending.groupby('Month')['Amount'].sum()
-            monthly_totals = monthly_totals.reindex(sorted(monthly_totals.index, key=month_sort_key)).reset_index()
-            monthly_totals.columns = ['Month', 'Amount']
+            # "Spending" excludes Savings & Investments entirely (that's the
+            # whole point of the split) and stays gross/unmodified, matching
+            # the Dashboard's other spending views. "Savings & Investments"
+            # reuses the same netted-by-month figures as the Savings Rate KPI
+            # (savings_info, computed above) rather than recalculating them.
+            spend_no_savings = spending[spending['Category'] != 'Savings & Investments']
+            monthly_spend = spend_no_savings.groupby('Month')['Amount'].sum()
+            savings_by_month = savings_info['savings_by_month']
 
-            fig_trend = px.line(monthly_totals, x='Month', y='Amount', labels={'Amount': 'Spending (£)', 'Month': ''})
-            fig_trend.update_traces(line_color='#1D9E75', line_width=2)
+            months = sorted(set(monthly_spend.index) | set(savings_by_month.keys()), key=month_sort_key)
+            trend_df = pd.DataFrame({
+                'Month': months + months,
+                'Line': ['Spending'] * len(months) + ['Savings & Investments'] * len(months),
+                'Amount': [monthly_spend.get(m, 0.0) for m in months] + [savings_by_month.get(m, 0.0) for m in months],
+            })
+
+            fig_trend = px.line(
+                trend_df, x='Month', y='Amount', color='Line',
+                labels={'Amount': '', 'Month': ''},
+                color_discrete_map={'Spending': '#1D9E75', 'Savings & Investments': '#2a78d6'},
+                category_orders={'Month': months}
+            )
+            fig_trend.update_traces(line_width=2, hovertemplate='£%{y:,.0f}<extra></extra>')
+            fig_trend.add_hline(y=0, line_width=1, line_color='rgba(128,128,128,0.4)')
             fig_trend.update_layout(
                 yaxis_tickprefix='£',
                 yaxis_tickformat=',.0f',
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
-                margin=dict(l=0, r=0, t=0, b=0)
+                margin=dict(l=0, r=0, t=10, b=0),
+                hovermode='x unified',
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1, title=None)
             )
             st.plotly_chart(fig_trend, use_container_width=True)
 

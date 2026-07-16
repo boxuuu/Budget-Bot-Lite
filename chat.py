@@ -5,12 +5,7 @@ from datetime import datetime
 from database import get_db, Transaction
 from categoriser import CATEGORIES
 from networth import get_asset_names, get_asset_name_tags, project_net_worth
-from analytics import month_sort_key, calculate_savings_rate, net_spend_amount
-
-def format_gbp(amount):
-    """£123.45 for positive/zero, -£123.45 (not £-123.45) for negative -
-    needed now that Savings & Investments figures can be net-negative."""
-    return f"-£{abs(amount):.2f}" if amount < 0 else f"£{amount:.2f}"
+from analytics import month_sort_key, calculate_savings_rate, net_spend_amount, format_gbp
 
 def get_spending_context(db):
     transactions = db.query(Transaction).all()
