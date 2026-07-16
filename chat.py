@@ -5,7 +5,12 @@ from datetime import datetime
 from database import get_db, Transaction
 from categoriser import CATEGORIES
 from networth import get_asset_names, get_asset_name_tags, project_net_worth
-from analytics import month_sort_key, calculate_savings_rate
+from analytics import month_sort_key, calculate_savings_rate, net_spend_amount
+
+def format_gbp(amount):
+    """£123.45 for positive/zero, -£123.45 (not £-123.45) for negative -
+    needed now that Savings & Investments figures can be net-negative."""
+    return f"-£{abs(amount):.2f}" if amount < 0 else f"£{amount:.2f}"
 
 def get_spending_context(db):
     transactions = db.query(Transaction).all()
@@ -20,22 +25,31 @@ def get_spending_context(db):
     unique_merchants = defaultdict(lambda: {'category': '', 'total': 0, 'count': 0})
     
     for t in transactions:
+        # Category/month totals are net of savings-pot transfers (money
+        # returning from Fun Money etc. reduces the total, not just money
+        # ignored) - but the per-merchant list stays exact-spend-only, since
+        # "To Fun Money" and "From Fun Money" are different description
+        # strings and a merchant row showing a negative total would look
+        # like a display bug, not a feature.
+        net = net_spend_amount(t.amount, t.description)
+        if net:
+            by_category[t.category] += net
+            by_month[t.month] += net
+            by_month_category[t.month][t.category] += net
+
         if t.amount < 0:
             amt = abs(t.amount)
-            by_category[t.category] += amt
-            by_month[t.month] += amt
-            by_month_category[t.month][t.category] += amt
             unique_merchants[t.description]['category'] = t.category
             unique_merchants[t.description]['total'] += amt
             unique_merchants[t.description]['count'] += 1
     
     category_summary = "\n".join([
-        f"- {cat}: £{total:.2f}" 
+        f"- {cat}: {format_gbp(total)}"
         for cat, total in sorted(by_category.items(), key=lambda x: x[1], reverse=True)
     ])
-    
+
     month_summary = "\n".join([
-        f"- {month}: £{total:.2f}"
+        f"- {month}: {format_gbp(total)}"
         for month, total in sorted(by_month.items(), key=lambda x: month_sort_key(x[0]))
     ])
 
@@ -43,7 +57,7 @@ def get_spending_context(db):
     for month in sorted(by_month_category.keys(), key=month_sort_key):
         month_category_summary += f"\n{month}:\n"
         for cat, total in sorted(by_month_category[month].items(), key=lambda x: x[1], reverse=True):
-            month_category_summary += f"  - {cat}: £{total:.2f}\n"
+            month_category_summary += f"  - {cat}: {format_gbp(total)}\n"
 
     merchant_summary = "\n".join([
         f"- {merchant}: {data['category']} (£{data['total']:.2f} total, {data['count']} transactions)"
@@ -62,7 +76,7 @@ def get_spending_context(db):
     bonus_month = savings_info['bonus_month']
 
     savings_by_month_summary = "\n".join([
-        f"- {month}: £{amt:.2f}" for month, amt in savings_info['savings_by_month'].items()
+        f"- {month}: {format_gbp(amt)}" for month, amt in savings_info['savings_by_month'].items()
     ])
 
     # Month-over-month change per category, computed here (not left to the
@@ -77,9 +91,9 @@ def get_spending_context(db):
             latest_amt = by_month_category[latest_month].get(cat, 0.0)
             if prev_amt:
                 pct = (latest_amt - prev_amt) / prev_amt * 100
-                lines.append(f"- {cat}: £{prev_amt:.2f} -> £{latest_amt:.2f} ({pct:+.1f}%)")
+                lines.append(f"- {cat}: {format_gbp(prev_amt)} -> {format_gbp(latest_amt)} ({pct:+.1f}%)")
             else:
-                lines.append(f"- {cat}: £{prev_amt:.2f} -> £{latest_amt:.2f} (new spending this month)")
+                lines.append(f"- {cat}: {format_gbp(prev_amt)} -> {format_gbp(latest_amt)} (new spending this month)")
         momentum_summary = f"{prev_month} -> {latest_month}:\n" + "\n".join(lines)
 
     income_by_month_summary = "\n".join([
@@ -100,9 +114,9 @@ SPENDING BY MONTH AND CATEGORY:
 ALL MERCHANTS (name: category, total spent, number of transactions):
 {merchant_summary}
 
-AVERAGE MONTHLY SPEND (across {len(months_sorted)} months of data): £{avg_monthly_spend:.2f}
+AVERAGE MONTHLY SPEND (across {len(months_sorted)} months of data): {format_gbp(avg_monthly_spend)}
 
-SAVINGS & INVESTMENTS SPEND BY MONTH (average £{avg_savings:.2f}/month, ranging from £{min_savings:.2f} to £{max_savings:.2f} - highly volatile, treat the average as a rough figure only):
+SAVINGS & INVESTMENTS SPEND BY MONTH (average {format_gbp(avg_savings)}/month, ranging from {format_gbp(min_savings)} to {format_gbp(max_savings)} - highly volatile, treat the average as a rough figure only). These figures are NET of transfers into and back out of Jonathan's savings pots (Fun Money, Round up, Emergency Fund, Wedding, Overflow) - a month can legitimately be negative when withdrawals outweigh contributions. Do not compute or trust simple percentage-change framing for this category (e.g. don't say "savings dropped X%" when the underlying figure crossed zero - that framing is meaningless once a total goes negative):
 {savings_by_month_summary}
 
 MONTH-OVER-MONTH CATEGORY CHANGE (most recent two months):
@@ -113,7 +127,7 @@ SALARY BY MONTH (identified via "From B E" transactions):
 
 TYPICAL MONTHLY SALARY (median, robust to the bonus month): £{typical_monthly_income:.2f}
 
-CURRENT SAVINGS RATE: averaging £{avg_savings:.2f}/month into Savings & Investments, which is {savings_rate:.1f}% of typical monthly salary.
+CURRENT SAVINGS RATE: net {format_gbp(avg_savings)}/month into Savings & Investments (after netting out savings-pot withdrawals), which is {savings_rate:.1f}% of typical monthly salary. A negative figure means more came out of savings pots than went in that period, on average - it does not mean Jonathan overspent his salary.
 """
 
 def get_system_prompt(context):

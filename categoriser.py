@@ -3,6 +3,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 CATEGORIES = [
+    "Salary",
     "Groceries",
     "Eating Out & Takeaway",
     "Coffee & Beans",
@@ -22,6 +23,9 @@ CATEGORIES = [
 # Known rules - these are applied before Ollama is even consulted
 # Add to this list as you correct things on the Manage Categories page
 KNOWN_RULES = {
+    # Income, not spend - checked first since it's conceptually distinct
+    # from everything else in this dict
+    "from b e": "Salary",
     "tesco": "Groceries",
     "aldi": "Groceries",
     "asda": "Groceries",
@@ -76,6 +80,7 @@ KNOWN_RULES = {
     "emergency fund": "Savings & Investments",
     "fun money": "Savings & Investments",
     "overflow": "Savings & Investments",
+    "round up": "Savings & Investments",
     "holidays": "Savings & Investments",
     "amazon": "Shopping",
     "ebay": "Shopping",

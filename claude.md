@@ -1,5 +1,8 @@
 # Budget Bot
 
+> See `PLAN.md` for current progress, known issues, and next actions — read it before starting work
+> on this project, and update it at the end of any session that changes the codebase.
+
 ## What this is
 Budget Bot is a personal finance app built in Python/Streamlit for Jonathan Cummins, based in Manchester, UK.
 It runs entirely locally on a MacBook Air M3 (24GB RAM) and uses Ollama for local LLM capabilities.
@@ -9,7 +12,9 @@ them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net
 ## Tech stack
 - **Frontend:** Streamlit
 - **Database:** SQLite via SQLAlchemy
-- **LLM:** Ollama running Llama 3.2 locally, with tool-calling for chat-driven updates
+- **LLM:** Ollama running two local models for two different jobs — `llama3.2` (3B, fast) for batch
+  merchant categorisation, `qwen2.5:14b` (slower, better reasoning) for the chat assistant's
+  tool-calling and advice
 - **Web search:** ddgs (DuckDuckGo) for merchant categorisation context
 - **PDF parsing:** PyMuPDF (fitz)
 - **Charts:** Plotly
@@ -21,12 +26,17 @@ them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net
 - `categoriser.py` — merchant categorisation logic using known rules + Ollama fallback (with ddgs web search context)
 - `networth.py` — net worth/asset tracking models and functions (AssetValue model)
 - `budget.py` — personal and household budget models and functions (PersonalBudgetItem, HouseholdBudgetItem, BudgetSetting)
+- `analytics.py` — shared cross-page calculations: chronological month-sorting, savings-rate
+  calculation (net of savings-pot transfers), used by both the Dashboard and Chat
 - `chat.py` — Ollama chat interface with spending context and tool-calling for category/net worth updates
+- `.streamlit/config.toml` — theme config (brand accent colour only, so the native light/dark/system
+  toggle keeps working)
 - `budget_bot.db` — SQLite database (do not delete)
 - `start.sh` — shell script to launch the app
 
 ## Pages (sidebar navigation)
-1. **Dashboard** — spending metrics, category bar chart, monthly trend line, top 10 transactions
+1. **Dashboard** — KPI row (Net Worth, Total Spent, Monthly Average, Savings Rate), category pie
+   chart (top 6 categories + "Other categories"), Top 10 Merchants table, monthly spending trend chart
 2. **Net Worth** — asset tracking with time-series graphs, imported from Worth It app export
 3. **Personal Budget** — live-editable Money In/Money Out grids, manually-entered total income (minus salary sacrifice), and computed income-minus-expenses/money-per-week figures
 4. **Household Budget** — live-editable bills grid (service, provider, renewal date, amount) with a computed total, and an editable percentage split between the two people in the household
@@ -66,9 +76,16 @@ for scrollable message history.
   Budget) and `household_split_percent` (editable % split between the two people in the household).
 
 ## Categories used
-Groceries, Eating Out & Takeaway, Coffee & Beans, Shopping, Transport, Health & Fitness,
+Salary, Groceries, Eating Out & Takeaway, Coffee & Beans, Shopping, Transport, Health & Fitness,
 Subscriptions, Phone & Internet, Insurance & Finance, Savings & Investments, Charity,
 Bills & Utilities, Rent & Housing, Other
+
+Salary is income only (identified via "From B E" transactions) and is never included in spending
+totals. Savings & Investments figures used for the Savings Rate calculation (Dashboard KPI and Chat)
+are net of transfers to/from Jonathan's named savings pots (Fun Money, Round up, Emergency Fund,
+Wedding, Overflow) — money moving back out of a pot reduces the figure rather than being invisible.
+This netting applies only to the Savings Rate calculation, not to the Dashboard's general spending
+views (pie chart, Total Spent, trend chart), which stay gross/unmodified by design.
 
 ## Coding preferences
 - No emojis anywhere in the UI

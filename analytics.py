@@ -7,13 +7,39 @@ def month_sort_key(month_label):
     Parse it into a real date so 'most recent month' actually means that."""
     return datetime.strptime(month_label, '%b %Y')
 
+# Jonathan's named savings pots - money going TO these is a real saving,
+# money coming FROM them back to the main account is money he already
+# owned returning, not new income or new spending. Scoped explicitly to
+# these 5 (rather than derived from KNOWN_RULES) so a one-directional
+# Savings & Investments item like a pension contribution is never
+# accidentally netted against nothing.
+SAVINGS_POT_NAMES = ['fun money', 'round up', 'emergency fund', 'wedding', 'overflow']
+
+def is_savings_transfer(description):
+    return any(pot in description.lower() for pot in SAVINGS_POT_NAMES)
+
+def net_spend_amount(amount, description):
+    """How much a transaction contributes to a spend/category total: the
+    full amount for a real outflow; for money returning from one of
+    Jonathan's named savings pots (positive amount, matches a pot name) it
+    nets NEGATIVELY, since it's money he already owned coming back, not new
+    spending or income. Everything else contributes 0."""
+    if amount < 0:
+        return abs(amount)
+    if amount > 0 and is_savings_transfer(description):
+        return -amount
+    return 0
+
 def calculate_savings_rate(transactions):
     """Computes salary/savings-rate figures from a list of Transaction
     objects. Salary is identified via "From B E" transactions (confirmed as
     Jonathan's salary); one month per year typically includes his annual
     bonus, so the median across months (robust to that outlier) is used as
     the typical monthly figure. Savings is the "Savings & Investments"
-    spending category.
+    category, netted via net_spend_amount() so money moving back out of a
+    named savings pot reduces the figure rather than being invisible - this
+    can legitimately make a month's (or the overall) savings figure negative
+    when withdrawals outweigh contributions.
 
     Returns a dict: income_by_month, bonus_month, typical_monthly_income,
     savings_by_month, avg_savings, min_savings, max_savings, savings_rate.
@@ -22,8 +48,9 @@ def calculate_savings_rate(transactions):
     income_by_month = defaultdict(float)
 
     for t in transactions:
-        if t.amount < 0:
-            by_month_category[t.month][t.category] += abs(t.amount)
+        net = net_spend_amount(t.amount, t.description)
+        if net:
+            by_month_category[t.month][t.category] += net
         if t.amount > 0 and t.description.lower().startswith('from b e'):
             income_by_month[t.month] += t.amount
 
