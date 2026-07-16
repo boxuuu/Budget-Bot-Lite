@@ -108,6 +108,12 @@ important than visual polish, though both have had real investment.
 - [x] Fixed negative-currency formatting in chat context (was rendering `£-1,461`, now `-£1,461`)
 - [x] Real database re-categorised with the new rules (verified: 6 Salary rows, 0 Uncategorised)
 - [x] Committed and pushed (2026-07-16)
+- [x] Fixed three categoriser issues found by investigating why "Other" was the #2 spending
+      category: the `"aj bell"` rule never matched `"A J Bell Securities"` (spacing), cash
+      withdrawals fragmented into one "unique merchant" per branch/location instead of one rule,
+      and the web search query reliably surfaced Companies House registration boilerplate instead
+      of anything describing what a business actually does. Re-ran categorisation on the real
+      database: "Other" dropped from £4,644 to £2,282, no longer the #2 category (2026-07-16)
 
 ### Stage 8 — Budget Targets & Comparisons
 - [ ] **Budget targets vs actuals on the Dashboard — deferred, revisit when Jonathan wants it.**
@@ -123,13 +129,51 @@ important than visual polish, though both have had real investment.
       "month-on-month" need that came up, may or may not fully close this checklist item depending
       on what else Jonathan has in mind for it.
 
-## 6. Progress
+## 6. Suggested Features (Not Yet Planned)
 
-**~95% complete.** Stage 7 fully done and pushed. Stage 8 has one concrete win (Dashboard trend
-chart split into Spending vs Savings lines) and one deliberately deferred decision (budget
-targets vs actuals — needs Jonathan's input on scope, see checklist above).
+Ideas raised in conversation, not committed to any stage yet. Resurface these if Jonathan asks
+"what's on the plan" or similar — don't build any of them unprompted.
 
-## 7. Known Issues
+1. **Subscription audit** — a view listing every recurring/subscription-style charge (Subscriptions
+   category: Claude, iCloud, Patreon, Steam, Microsoft, etc.) with total monthly burn. **Jonathan is
+   actively interested in this one (2026-07-16) — see the expanded version below, currently the most
+   likely next build.**
+2. **In-month spend pace** — "you've spent £340 of a typical £450 Eating Out month, and it's only the
+   12th" — projects the current month's trajectory against historical per-category averages. Lighter
+   weight than a formal budget; sidesteps the Stage 8 budget-definition problem entirely.
+3. **Savings goal tracking** — per-named-pot progress (Wedding, Emergency Fund, mortgage overpayments
+   via Sprive) shown as "£X of £Y saved" against an implicit or explicit target, rather than the
+   current lump Savings & Investments figure.
+4. **Asset allocation view on Net Worth** — a % breakdown across cash / stocks / crypto / pension
+   (AJ Bell pension, ISA, Coinbase, Barclays Shares) — the current total net worth figure hides
+   diversification/risk exposure entirely.
+5. **Backup/export** — a one-click CSV/DB export. `budget_bot.db` is flagged "do not delete" in
+   CLAUDE.md but has no backup story; it's a single local file holding years of net worth history.
+
+### Subscription audit, expanded (2026-07-16 discussion)
+Jonathan's specific ask: not just a list of recurring charges, but something that cross-checks against
+the **Personal Budget "Money Out" list** so nothing gets missed in either direction —
+(a) *recurring charges with no matching Personal Budget line* (paying for something he forgot to
+budget for, or forgot he's still paying for at all), and (b) *Personal Budget lines with no recent
+matching transaction* (budgeted for something that's lapsed or been cancelled). This is a
+reconciliation/detection feature (matched vs unmatched), not a numeric budget-vs-actual comparison —
+which sidesteps the Stage 8 mapping-precision problem, since it only needs to answer "does this
+recurring charge appear somewhere in the budget, yes or no," not "is the amount exactly right."
+Several Personal Budget items already map to a specific known merchant/rule in `categoriser.py`
+(BJJ/GYM → gym rules, Phone → Vodafone/Plusnet, SIPP/ISA → AJ Bell/Sippdeal, Claude/iCloud →
+subscription rules), which is a more precise anchor than category-level matching. Not yet designed in
+detail or built — next step if Jonathan wants to proceed is nailing down what counts as "recurring"
+(e.g. appeared in ≥2 of the last 3 months) and how fuzzy the budget-item-to-merchant match should be.
+
+## 7. Progress
+
+**~95% complete** on the original 8-stage plan. Stage 7 fully done and pushed. Stage 8 has one
+concrete win (Dashboard trend chart split into Spending vs Savings lines) and one deliberately
+deferred decision (budget targets vs actuals — Jonathan is happy with raw data access instead, see
+Known Issues). Separately, a new feature (subscription audit) is now under active discussion —
+see Suggested Features above.
+
+## 8. Known Issues
 
 - **Chat model reliability**: the local `qwen2.5:14b` model occasionally misfires a tool call on an
   ordinary question (~1 in 5 in testing) or produces malformed output (wrong script, leaked JSON) on
@@ -151,17 +195,22 @@ targets vs actuals — needs Jonathan's input on scope, see checklist above).
   2026 each had net withdrawals from savings pots exceeding contributions. Confirmed with Jonathan
   2026-07-16 that this is correct/expected, not a bug — pots draining is real signal worth seeing, not
   something to hide behind a flat/always-positive percentage.
-- **Budget targets vs actuals scope undecided**: see Stage 8 checklist above — deferred until Jonathan
-  picks total-level vs per-category. Ask again periodically rather than assuming.
+- **Budget targets vs actuals: parked, not just deferred**: Jonathan decided (2026-07-16) he's happy
+  having access to the raw data and making his own calls rather than the app formally comparing
+  budget vs actual. Don't build Stage 8's original goal unprompted — only the subscription-audit
+  angle (Suggested Features above) is currently active.
 
-## 8. Next Actions
+## 9. Next Actions
 
-1. **Revisit budget targets vs actuals** (Stage 8) — check in periodically on whether Jonathan wants
-   total-level or per-category, then build it.
-2. Nothing else currently blocking — Stage 7 is shipped, the trend-chart split is done and verified in
-   a real browser. Next likely work is whatever Jonathan raises next session.
+1. **Design and build the expanded subscription audit** — cross-check recurring charges against the
+   Personal Budget "Money Out" list in both directions (charges missing from the budget, budget lines
+   with no recent matching charge). See "Subscription audit, expanded" under Suggested Features above
+   for what's already been discussed; next step is nailing down the "recurring" and match-fuzziness
+   definitions with Jonathan before writing code.
+2. Resurface the other four Suggested Features ideas if Jonathan asks what's on the plan — none are
+   committed to yet.
 
-## 9. Session Log
+## 10. Session Log
 
 ### 2026-07-15 — Core build
 Built the app from an initial Chase-PDF-parsing prototype up through a full-featured local finance
@@ -206,6 +255,31 @@ green Spending line now peaks around £6,500 instead of £15k, and the blue Savi
 negative from March, matching the real net-withdrawal data. Also confirmed with Jonathan that the
 Savings Rate KPI's current negative value (-41% of salary) is accurate, not a bug — pots have
 genuinely been net-draining since March.
+
+### 2026-07-16 (continued) — Categoriser fixes, Stage 8 parked, feature brainstorm
+Jonathan asked why "Other" was his second-largest category — investigated and found it was £4,644
+across 93 transactions, some genuinely miscellaneous but several real categoriser misses: the
+`"aj bell"` rule silently never matched `"A J Bell Securities"` (spacing), cash withdrawals
+fragmented into a separate "unique merchant" per branch/location instead of hitting one rule, and
+(the interesting one) a pub called "Overdraught" got miscategorised because the web search query
+("{merchant} UK company what type of business") reliably surfaced Companies House registration
+boilerplate instead of anything describing what the business does. Fixed all three (new rules +
+Companies-House-snippet filtering + reworded queries), verified the fix live against Ollama (flaky
+once, then consistently correct), and re-ran categorisation on the real database: "Other" dropped to
+£2,282, no longer the #2 category. Committed both this and the earlier trend-chart/formatting work
+(2 commits, not yet pushed — Jonathan wants to test in the app first).
+
+Talked through Stage 8 ("budget vs actuals") in more depth: surfaced that Personal Budget items have
+no stored time period or history (editing overwrites silently), and — more importantly — that
+household bills aren't itemised in Jonathan's transaction data at all, only lump transfers to a
+shared "House Account" are visible, so per-bill household comparison isn't achievable with current
+data regardless of mapping approach. Jonathan decided to park the original Stage 8 goal entirely
+rather than build any version of it — he's happy with raw data access. Brainstormed and recorded five
+other feature ideas (Suggested Features, §6) at his request, for future resurfacing rather than
+immediate action. Of those, he's actively interested in the subscription audit idea and wants it
+expanded into a two-way reconciliation against the Personal Budget "Money Out" list (catch charges
+missing from the budget, and budget lines that have lapsed) — recorded in detail under Suggested
+Features; not yet designed in full or built.
 
 ---
 
