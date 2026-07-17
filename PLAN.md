@@ -81,9 +81,11 @@ important than visual polish, though both have had real investment.
 - [x] KPI row: Net Worth, Total Spent, Monthly Average, Savings Rate
 - [x] Category pie chart (top 6 categories + "Other categories", validated colourblind-safe palette)
 - [x] Top 10 Merchants table
-- [x] Monthly spending trend chart
+- [x] Monthly spending trend chart (now "Monthly Spending & Savings Trend", two lines)
 - [x] `analytics.py`: shared chronological month-sorting + savings-rate calculation, used by both
       the Dashboard and Chat (previously duplicated, buggy logic — now one source of truth)
+- [x] Time-range filters (All / 1 Year / YTD / 6 Months / 1 Month) on the pie chart and trend chart,
+      matching the Net Worth page's filter pattern — independent per section, not shared (2026-07-17)
 
 ### Stage 5 — AI Chat Assistant
 - [x] Ollama tool-calling: `update_networth`, `update_category`, `project_net_worth` (with optional
@@ -340,6 +342,25 @@ projections become a regular ask.
 
 Jonathan ended the session here - PLAN.md updated and everything committed locally
 (`chat.py`/`networth.py` projection fix), not yet pushed to `origin/main`.
+
+### 2026-07-17 — Dashboard time-range filters
+Added time-range filters (All / 1 Year / YTD / 6 Months / 1 Month) to the Dashboard's "Spending by
+Category" pie chart and "Monthly Spending & Savings Trend" chart, matching the Net Worth page's
+existing filter pattern (button row + session-state selection + "Showing: X" caption) rather than
+inventing a new one. Each section got its own independent filter (not one shared control) since
+Jonathan asked for filters on "the 2 sections" and viewing the pie chart at a different range than the
+trend chart is a reasonable thing to want. Implementation notes: `Transaction.date` is a string
+("01 Jan 2026" format) so a parsed `DateParsed` column was added to the Dashboard's working
+DataFrame once and reused by both filters; the trend chart's Savings & Investments line now
+recomputes `calculate_savings_rate()` on the filtered transaction subset per selection, rather than
+reusing the KPI row's always-unfiltered figure. Found and fixed a real cosmetic bug along the way:
+"6 Months" word-wrapped mid-word ("6 / Month / s") in the pie chart's half-width card, since the same
+5-button row that fits comfortably on the Net Worth page's full-width layout doesn't fit in a
+half-width Dashboard card - fixed with shorter button text (All/1yr/YTD/6mo/1mo) while keeping the
+full name in the "Showing: ..." caption for readability. Both filters verified live in the browser:
+confirmed they operate fully independently (changing one doesn't affect the other), confirmed the
+pie chart correctly reflows for a filtered subset, and added an empty-state message for both charts
+in case a selected range has no data. Committed, not yet pushed.
 
 ---
 

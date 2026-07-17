@@ -182,10 +182,43 @@ if page == "Dashboard":
             'Category': t.category,
             'Month': t.month
         } for t in all_transactions])
+        df['DateParsed'] = pd.to_datetime(df['Date'], format='%d %b %Y')
 
         # Separate money out (negative) from money in (positive)
         spending = df[df['Amount'] < 0].copy()
         spending['Amount'] = spending['Amount'].abs()
+
+        # Same time-range filter options as the Net Worth page, reused here
+        # for the pie chart and trend chart (each has its own independent
+        # selection via a distinct key_prefix) rather than one filter for
+        # the whole Dashboard, since "spending by category this month" and
+        # "the 6-month trend" are both reasonable things to want at once.
+        now = datetime.utcnow()
+        time_filters = {
+            'All': None,
+            '1 Year': now - timedelta(days=365),
+            'YTD': datetime(now.year, 1, 1),
+            '6 Months': now - timedelta(days=182),
+            '1 Month': now - timedelta(days=30)
+        }
+
+        # Short button text so "6 Months" doesn't word-wrap mid-word in the
+        # half-width pie chart card - the full name still shows in the
+        # "Showing: ..." caption below the buttons.
+        short_labels = {'All': 'All', '1 Year': '1yr', 'YTD': 'YTD', '6 Months': '6mo', '1 Month': '1mo'}
+
+        def render_time_filter(key_prefix):
+            cols = st.columns(5)
+            state_key = f"{key_prefix}_filter"
+            if state_key not in st.session_state:
+                st.session_state[state_key] = 'All'
+            for col, label in zip(cols, time_filters.keys()):
+                with col:
+                    if st.button(short_labels[label], key=f"{key_prefix}_filter_btn_{label}"):
+                        st.session_state[state_key] = label
+            selected = st.session_state[state_key]
+            st.caption(f"Showing: {selected}")
+            return time_filters[selected]
 
         # --- KPI row ---
         with st.container(border=True, key="card_dashboard_kpis"):
@@ -225,41 +258,47 @@ if page == "Dashboard":
 
         with col_pie, st.container(border=True, key="card_dashboard_pie"):
             st.subheader("Spending by Category")
-            category_totals = spending.groupby('Category')['Amount'].sum().sort_values(ascending=False)
+            pie_cutoff = render_time_filter("dashboard_pie")
+            pie_spending = spending[spending['DateParsed'] >= pie_cutoff] if pie_cutoff else spending
 
-            # Cap the pie at the 6 biggest categories - beyond that it gets too
-            # cluttered to read at a glance - and fold the rest into one slice.
-            # The literal "Other" category is itself a catch-all, so it's
-            # always folded in here too rather than ever shown as a top
-            # slice - otherwise "Other" and "Other categories" would show up
-            # side by side, which reads as a labeling mistake.
-            real_categories = category_totals.drop('Other', errors='ignore')
-            top6 = real_categories.head(6)
-            other_total = category_totals.sum() - top6.sum()
-            pie_data = top6.copy()
-            if other_total > 0:
-                pie_data['Other categories'] = other_total
-            pie_data = pie_data.reset_index()
-            pie_data.columns = ['Category', 'Amount']
+            if pie_spending.empty:
+                st.write("No spending data for this period.")
+            else:
+                category_totals = pie_spending.groupby('Category')['Amount'].sum().sort_values(ascending=False)
 
-            # Validated categorical palette (fixed hue order), muted gray for
-            # the folded "Other categories" bucket so it reads as an
-            # aggregate rather than a peer category
-            palette = ['#2a78d6', '#008300', '#e87ba4', '#eda100', '#1baf7a', '#eb6834']
-            color_map = {cat: palette[i] for i, cat in enumerate(top6.index)}
-            color_map['Other categories'] = '#898781'
+                # Cap the pie at the 6 biggest categories - beyond that it gets too
+                # cluttered to read at a glance - and fold the rest into one slice.
+                # The literal "Other" category is itself a catch-all, so it's
+                # always folded in here too rather than ever shown as a top
+                # slice - otherwise "Other" and "Other categories" would show up
+                # side by side, which reads as a labeling mistake.
+                real_categories = category_totals.drop('Other', errors='ignore')
+                top6 = real_categories.head(6)
+                other_total = category_totals.sum() - top6.sum()
+                pie_data = top6.copy()
+                if other_total > 0:
+                    pie_data['Other categories'] = other_total
+                pie_data = pie_data.reset_index()
+                pie_data.columns = ['Category', 'Amount']
 
-            fig_pie = px.pie(
-                pie_data, values='Amount', names='Category',
-                color='Category', color_discrete_map=color_map
-            )
-            fig_pie.update_traces(textinfo='label+percent', textposition='inside')
-            fig_pie.update_layout(
-                showlegend=True,
-                margin=dict(l=0, r=0, t=10, b=0),
-                paper_bgcolor='rgba(0,0,0,0)'
-            )
-            st.plotly_chart(fig_pie, use_container_width=True)
+                # Validated categorical palette (fixed hue order), muted gray for
+                # the folded "Other categories" bucket so it reads as an
+                # aggregate rather than a peer category
+                palette = ['#2a78d6', '#008300', '#e87ba4', '#eda100', '#1baf7a', '#eb6834']
+                color_map = {cat: palette[i] for i, cat in enumerate(top6.index)}
+                color_map['Other categories'] = '#898781'
+
+                fig_pie = px.pie(
+                    pie_data, values='Amount', names='Category',
+                    color='Category', color_discrete_map=color_map
+                )
+                fig_pie.update_traces(textinfo='label+percent', textposition='inside')
+                fig_pie.update_layout(
+                    showlegend=True,
+                    margin=dict(l=0, r=0, t=10, b=0),
+                    paper_bgcolor='rgba(0,0,0,0)'
+                )
+                st.plotly_chart(fig_pie, use_container_width=True)
 
         with col_merchants, st.container(border=True, key="card_dashboard_merchants"):
             st.subheader("Top 10 Merchants")
@@ -281,41 +320,52 @@ if page == "Dashboard":
                 "line nets out withdrawals, so it can dip below zero in a month where more came out "
                 "of a pot than went in."
             )
+            trend_cutoff = render_time_filter("dashboard_trend")
+            trend_spending = spending[spending['DateParsed'] >= trend_cutoff] if trend_cutoff else spending
+            trend_transactions = (
+                [t for t in all_transactions if datetime.strptime(t.date, '%d %b %Y') >= trend_cutoff]
+                if trend_cutoff else all_transactions
+            )
 
             # "Spending" excludes Savings & Investments entirely (that's the
             # whole point of the split) and stays gross/unmodified, matching
             # the Dashboard's other spending views. "Savings & Investments"
-            # reuses the same netted-by-month figures as the Savings Rate KPI
-            # (savings_info, computed above) rather than recalculating them.
-            spend_no_savings = spending[spending['Category'] != 'Savings & Investments']
+            # is recomputed for the selected time range (not reused from the
+            # KPI row's savings_info, which always covers all data) via the
+            # same netting logic as the Savings Rate KPI.
+            spend_no_savings = trend_spending[trend_spending['Category'] != 'Savings & Investments']
             monthly_spend = spend_no_savings.groupby('Month')['Amount'].sum()
-            savings_by_month = savings_info['savings_by_month']
+            savings_by_month = calculate_savings_rate(trend_transactions)['savings_by_month']
 
             months = sorted(set(monthly_spend.index) | set(savings_by_month.keys()), key=month_sort_key)
-            trend_df = pd.DataFrame({
-                'Month': months + months,
-                'Line': ['Spending'] * len(months) + ['Savings & Investments'] * len(months),
-                'Amount': [monthly_spend.get(m, 0.0) for m in months] + [savings_by_month.get(m, 0.0) for m in months],
-            })
 
-            fig_trend = px.line(
-                trend_df, x='Month', y='Amount', color='Line',
-                labels={'Amount': '', 'Month': ''},
-                color_discrete_map={'Spending': '#1D9E75', 'Savings & Investments': '#2a78d6'},
-                category_orders={'Month': months}
-            )
-            fig_trend.update_traces(line_width=2, hovertemplate='£%{y:,.0f}<extra></extra>')
-            fig_trend.add_hline(y=0, line_width=1, line_color='rgba(128,128,128,0.4)')
-            fig_trend.update_layout(
-                yaxis_tickprefix='£',
-                yaxis_tickformat=',.0f',
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                margin=dict(l=0, r=0, t=10, b=0),
-                hovermode='x unified',
-                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1, title=None)
-            )
-            st.plotly_chart(fig_trend, use_container_width=True)
+            if not months:
+                st.write("No spending data for this period.")
+            else:
+                trend_df = pd.DataFrame({
+                    'Month': months + months,
+                    'Line': ['Spending'] * len(months) + ['Savings & Investments'] * len(months),
+                    'Amount': [monthly_spend.get(m, 0.0) for m in months] + [savings_by_month.get(m, 0.0) for m in months],
+                })
+
+                fig_trend = px.line(
+                    trend_df, x='Month', y='Amount', color='Line',
+                    labels={'Amount': '', 'Month': ''},
+                    color_discrete_map={'Spending': '#1D9E75', 'Savings & Investments': '#2a78d6'},
+                    category_orders={'Month': months}
+                )
+                fig_trend.update_traces(line_width=2, hovertemplate='£%{y:,.0f}<extra></extra>')
+                fig_trend.add_hline(y=0, line_width=1, line_color='rgba(128,128,128,0.4)')
+                fig_trend.update_layout(
+                    yaxis_tickprefix='£',
+                    yaxis_tickformat=',.0f',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    margin=dict(l=0, r=0, t=10, b=0),
+                    hovermode='x unified',
+                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1, title=None)
+                )
+                st.plotly_chart(fig_trend, use_container_width=True)
 
 # --- Upload Statement Page ---
 elif page == "Upload Statement":
