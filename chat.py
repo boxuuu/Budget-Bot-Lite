@@ -21,11 +21,12 @@ def get_spending_context(db):
     
     for t in transactions:
         # Category/month totals are net of savings-pot transfers (money
-        # returning from Fun Money etc. reduces the total, not just money
-        # ignored) - but the per-merchant list stays exact-spend-only, since
-        # "To Fun Money" and "From Fun Money" are different description
-        # strings and a merchant row showing a negative total would look
-        # like a display bug, not a feature.
+        # returning from Round up/Emergency Fund/Wedding/Overflow reduces
+        # the total, not just money ignored; Fun Money is excluded entirely
+        # in both directions, since it behaves as a spending buffer rather
+        # than genuine savings) - but the per-merchant list stays
+        # exact-spend-only, since a merchant row showing a negative total
+        # would look like a display bug, not a feature.
         net = net_spend_amount(t.amount, t.description)
         if net:
             by_category[t.category] += net
@@ -111,7 +112,7 @@ ALL MERCHANTS (name: category, total spent, number of transactions):
 
 AVERAGE MONTHLY SPEND (across {len(months_sorted)} months of data): {format_gbp(avg_monthly_spend)}
 
-SAVINGS & INVESTMENTS SPEND BY MONTH (average {format_gbp(avg_savings)}/month, ranging from {format_gbp(min_savings)} to {format_gbp(max_savings)} - highly volatile, treat the average as a rough figure only). These figures are NET of transfers into and back out of Jonathan's savings pots (Fun Money, Round up, Emergency Fund, Wedding, Overflow) - a month can legitimately be negative when withdrawals outweigh contributions. Do not compute or trust simple percentage-change framing for this category (e.g. don't say "savings dropped X%" when the underlying figure crossed zero - that framing is meaningless once a total goes negative):
+SAVINGS & INVESTMENTS SPEND BY MONTH (average {format_gbp(avg_savings)}/month, ranging from {format_gbp(min_savings)} to {format_gbp(max_savings)} - highly volatile, treat the average as a rough figure only). These figures are NET of transfers into and back out of Jonathan's long-term savings pots (Round up, Emergency Fund, Wedding, Overflow) - a month can legitimately be negative when withdrawals outweigh contributions. Fun Money is excluded entirely (both paying in and drawing down), since it behaves as a spending buffer rather than genuine savings, not a store of value. Do not compute or trust simple percentage-change framing for this category (e.g. don't say "savings dropped X%" when the underlying figure crossed zero - that framing is meaningless once a total goes negative):
 {savings_by_month_summary}
 
 MONTH-OVER-MONTH CATEGORY CHANGE (most recent two months):

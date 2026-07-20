@@ -10,13 +10,28 @@ def month_sort_key(month_label):
 # Jonathan's named savings pots - money going TO these is a real saving,
 # money coming FROM them back to the main account is money he already
 # owned returning, not new income or new spending. Scoped explicitly to
-# these 5 (rather than derived from KNOWN_RULES) so a one-directional
+# these 4 (rather than derived from KNOWN_RULES) so a one-directional
 # Savings & Investments item like a pension contribution is never
 # accidentally netted against nothing.
-SAVINGS_POT_NAMES = ['fun money', 'round up', 'emergency fund', 'wedding', 'overflow']
+SAVINGS_POT_NAMES = ['round up', 'emergency fund', 'wedding', 'overflow']
+
+# Fun Money behaves as a discretionary spending buffer, not real savings -
+# large sums move in and a similarly large (often larger) sum moves back
+# out within a month or two for actual spending. Excluded from the savings
+# total in BOTH directions: a contribution isn't durable saving if it's
+# earmarked to be spent, and a withdrawal isn't "un-saving" if the money
+# was never really saved long-term. Confirmed with Jonathan 2026-07-17
+# after finding it was the sole reason an otherwise strongly-positive
+# Savings Rate (£2.6k-£8.7k/month of real pension/ISA/wedding/round-up
+# saving) was showing negative - swamped by £3.9k-£11.8k/month of Fun
+# Money churn that isn't really savings at all.
+EXCLUDED_FROM_SAVINGS = ['fun money']
 
 def is_savings_transfer(description):
     return any(pot in description.lower() for pot in SAVINGS_POT_NAMES)
+
+def is_excluded_from_savings(description):
+    return any(name in description.lower() for name in EXCLUDED_FROM_SAVINGS)
 
 def format_gbp(amount, decimals=2):
     """£123.45 for positive/zero, -£123.45 (not £-123.45) for negative -
@@ -24,11 +39,14 @@ def format_gbp(amount, decimals=2):
     return f"-£{abs(amount):,.{decimals}f}" if amount < 0 else f"£{amount:,.{decimals}f}"
 
 def net_spend_amount(amount, description):
-    """How much a transaction contributes to a spend/category total: the
+    """How much a transaction contributes to a spend/category total: 0 for
+    anything matching EXCLUDED_FROM_SAVINGS (Fun Money, see above); the
     full amount for a real outflow; for money returning from one of
     Jonathan's named savings pots (positive amount, matches a pot name) it
     nets NEGATIVELY, since it's money he already owned coming back, not new
     spending or income. Everything else contributes 0."""
+    if is_excluded_from_savings(description):
+        return 0
     if amount < 0:
         return abs(amount)
     if amount > 0 and is_savings_transfer(description):

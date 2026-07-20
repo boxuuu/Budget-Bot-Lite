@@ -67,6 +67,9 @@ important than visual polish, though both have had real investment.
 - [x] Net Worth page: asset list + per-asset detail drill-down with full history
 - [x] Add/remove/update assets via UI
 - [x] Time-range filters (All / 1 Year / YTD / 6 Months / 1 Month)
+- [x] Per-asset Growth % column on the main Assets list, just right of Value — colour-coded
+      (green/red), recalculated for whichever time filter is currently selected on the page,
+      matching the "Current Total Assets" delta above it (2026-07-17)
 - [x] Growth-rate calculation + forward projection (blended market + contributions rate)
 - [x] Projected trend line drawn on the net worth chart
 
@@ -86,6 +89,11 @@ important than visual polish, though both have had real investment.
       the Dashboard and Chat (previously duplicated, buggy logic — now one source of truth)
 - [x] Time-range filters (All / 1 Year / YTD / 6 Months / 1 Month) on the pie chart and trend chart,
       matching the Net Worth page's filter pattern — independent per section, not shared (2026-07-17)
+- [x] Savings Rate KPI now shows the percentage as the headline figure (was the £ amount), with the
+      £/mo as a secondary delta — plus a help tooltip explaining the calculation (2026-07-17)
+- [x] Fun Money excluded entirely from the Savings & Investments figure (both contributions and
+      withdrawals) everywhere it's calculated — Dashboard KPI, Dashboard trend chart, and Chat —
+      since it behaves as a discretionary spending buffer, not genuine savings (2026-07-17)
 
 ### Stage 5 — AI Chat Assistant
 - [x] Ollama tool-calling: `update_networth`, `update_category`, `project_net_worth` (with optional
@@ -205,16 +213,20 @@ Features above) is built and verified in the real app, not yet pushed.
   if per-asset projections become something Jonathan actually uses regularly.
 - **PDF parser scope**: tuned specifically for Chase UK statement format — pre-existing, documented
   limitation, not something to fix unless a new statement format needs supporting.
-- **Savings & Investments netting scope**: applies to the Savings Rate KPI, Chat's context, and (as of
-  2026-07-16) the Dashboard trend chart's "Savings & Investments" line — but deliberately *not* to the
-  Dashboard's other general spending views (Total Spent, pie chart, top merchants), which stay
-  gross/unmodified by design (netting would break the pie chart, which can't render a negative slice,
-  and would misrepresent "Total Spent"). Worth knowing if numbers ever look inconsistent across the
-  Dashboard.
-- **Savings Rate can be genuinely negative**: currently -£1,561/mo (-41% of salary) because Mar–Jun
-  2026 each had net withdrawals from savings pots exceeding contributions. Confirmed with Jonathan
-  2026-07-16 that this is correct/expected, not a bug — pots draining is real signal worth seeing, not
-  something to hide behind a flat/always-positive percentage.
+- **Savings & Investments netting scope**: applies to the Savings Rate KPI, Chat's context, and the
+  Dashboard trend chart's "Savings & Investments" line — but deliberately *not* to the Dashboard's
+  other general spending views (Total Spent, pie chart, top merchants), which stay gross/unmodified
+  by design (netting would break the pie chart, which can't render a negative slice, and would
+  misrepresent "Total Spent"). Worth knowing if numbers ever look inconsistent across the Dashboard.
+- **Fun Money excluded from Savings & Investments entirely (2026-07-17), superseding the netting
+  design from 2026-07-16**: Jonathan was unhappy the Savings Rate KPI showed a discouraging negative
+  figure (-46%) despite feeling he saves well. Investigation found the netting design from the day
+  before was too broad — Fun Money's month-to-month churn (£3.9k-£11.8k moving both in and out most
+  months, presumably a spending buffer) was swamping genuinely strong, consistently positive saving
+  into Emergency Fund/Wedding/SIPP/ISA/Round up (£2.6k-£8.7k/month). Excluded Fun Money entirely
+  (`EXCLUDED_FROM_SAVINGS` in `analytics.py`) rather than just adjusting its netting direction — the
+  average Savings Rate went from -46% to a genuine +38%. The other 4 named pots (Round up, Emergency
+  Fund, Wedding, Overflow) are still netted as before; only Fun Money's treatment changed.
 - **Budget targets vs actuals: parked, not just deferred**: Jonathan decided (2026-07-16) he's happy
   having access to the raw data and making his own calls rather than the app formally comparing
   budget vs actual. Don't build Stage 8's original goal unprompted — only the subscription-audit
@@ -222,9 +234,9 @@ Features above) is built and verified in the real app, not yet pushed.
 
 ## 9. Next Actions
 
-1. Nothing currently blocking. The recurring-charges checklist is built and verified; the chat
-   projection date bug is fixed. Resurface the four remaining Suggested Features ideas (§6) if
-   Jonathan asks what's on the plan — none are committed to yet.
+1. Nothing currently blocking. Dashboard filters, Net Worth growth column, and the Savings Rate/Fun
+   Money fix are all built and verified. Resurface the four remaining Suggested Features ideas (§6)
+   if Jonathan asks what's on the plan — none are committed to yet.
 2. *(Low priority, only if it comes up)* If Jonathan starts using per-pension projections regularly,
    revisit the Mar 2025 pension-transfer distortion noted in Known Issues — would need a way to tag a
    specific asset-value change as "transfer" so it's excluded from that asset's growth rate.
@@ -361,6 +373,31 @@ full name in the "Showing: ..." caption for readability. Both filters verified l
 confirmed they operate fully independently (changing one doesn't affect the other), confirmed the
 pie chart correctly reflows for a filtered subset, and added an empty-state message for both charts
 in case a selected range has no data. Committed, not yet pushed.
+
+### 2026-07-17 (continued) — Net Worth growth column, Savings Rate/Fun Money fix
+Added a Growth % column to the Net Worth page's main Assets list, just right of Value, colour-coded
+green/red and recalculated for whichever time-range filter is currently selected on the page (reuses
+the same first/last-value-in-window logic as the "Current Total Assets" delta above it, applied
+per-asset). Verified live: confirmed the header label and every row's percentage update correctly
+when switching filters (e.g. Coinbase read -20.5% on "All" and -17.3% on "6 Months").
+
+Separately, Jonathan pushed back on the Dashboard Savings Rate KPI: it showed a discouraging negative
+figure despite him feeling he saves well, and he wanted it shown as a percentage with a better
+explanation. Broke down the underlying transactions by month and found the 2026-07-16 netting design
+was too broad: Fun Money's month-to-month churn (£3.9k-£11.8k moving both in and out most months) was
+swamping genuinely strong, consistently positive saving into Emergency Fund/Wedding/SIPP/ISA/Round up
+(£2.6k-£8.7k/month, positive every month). Confirmed with Jonathan that Fun Money behaves as a
+discretionary spending buffer, not real savings, and got explicit sign-off to exclude it entirely
+(both directions - a contribution isn't durable saving if it's earmarked to be spent) rather than
+just adjusting how it nets. Implemented via a new `EXCLUDED_FROM_SAVINGS` list in `analytics.py`
+(separate from `SAVINGS_POT_NAMES`, which still nets the other 4 pots as before); flipped the
+Dashboard KPI to show the percentage as the headline with the £/mo as a secondary delta, added a help
+tooltip explaining the calculation, and updated stale "Fun Money is a savings pot" wording in the
+trend chart caption and Chat's system prompt so nothing contradicts the new definition. Verified live
+in the browser (tile now reads +38%, £1,426/mo, green) and via a hover screenshot of the new help
+tooltip. Committed as two separate commits (Net Worth growth column; Savings Rate/Fun Money fix) via
+a manual `git add -p` split of `app.py`, kept logically separate despite landing in the same session.
+Not yet pushed.
 
 ---
 
