@@ -668,16 +668,18 @@ elif page == "Net Worth":
 
             asset_summary = df.sort_values('Date').groupby('Asset').agg(
                 Value=('Value', 'last'),
+                First=('Value', 'first'),
                 Tag=('Tag', 'last')
             ).reset_index().sort_values('Value', ascending=False)
 
-            header = st.columns([4, 2, 2])
+            header = st.columns([4, 2, 2, 2])
             header[0].caption("ASSET")
             header[1].caption("CATEGORY")
             header[2].caption("VALUE")
+            header[3].caption(f"GROWTH ({selected_filter})")
 
             for _, row in asset_summary.iterrows():
-                cols = st.columns([4, 2, 2])
+                cols = st.columns([4, 2, 2, 2])
                 with cols[0]:
                     if st.button(row['Asset'], key=f"nw_asset_{row['Asset']}", use_container_width=True):
                         st.session_state.nw_selected_asset = row['Asset']
@@ -686,6 +688,17 @@ elif page == "Net Worth":
                     st.write(row['Tag'])
                 with cols[2]:
                     st.write(f"£{row['Value']:,.0f}")
+                with cols[3]:
+                    # Growth over the same selected time-range filter as the
+                    # "Current Total Assets" delta above - the first and last
+                    # recorded value for this asset within that window.
+                    pct = ((row['Value'] - row['First']) / row['First'] * 100) if row['First'] else 0
+                    if pct > 0:
+                        st.markdown(f":green[+{pct:.1f}%]")
+                    elif pct < 0:
+                        st.markdown(f":red[{pct:.1f}%]")
+                    else:
+                        st.markdown(":gray[0.0%]")
 
         # Add or remove an asset
         with st.expander("Add or Remove an Asset"):
