@@ -75,7 +75,8 @@ important than visual polish, though both have had real investment.
 
 ### Stage 3 — Budgeting
 - [x] Personal Budget page: Money In/Money Out editable grids, manually-entered total income
-      override (salary sacrifice isn't fully known), computed Money Left Over
+      override (salary sacrifice isn't fully known), computed Money Left Over — renamed "Overview"
+      and moved to the top of the page, above Money In (2026-07-20)
 - [x] Household Budget page: bills grid (service/provider/renewal date/amount), computed total,
       editable % split between the two people in the household
 - [x] `budget.py` module: `PersonalBudgetItem`, `HouseholdBudgetItem`, `BudgetSetting` models
@@ -92,7 +93,9 @@ important than visual polish, though both have had real investment.
 ### Stage 4 — Dashboard & Analytics
 - [x] KPI row: Net Worth, Total Spent, Monthly Average, Savings Rate
 - [x] Category pie chart (top 6 categories + "Other categories", validated colourblind-safe palette)
-- [x] Top 10 Merchants table
+- [x] Top 10 Merchants table — split into "Top 10 Spend" and "Top 10 Save" (2026-07-20), since a
+      merchant showing a big savings-pot transfer alongside real purchases like Tesco/Amazon read as
+      confusing; shares one time filter (All/1yr/YTD/6mo/1mo), independent of the pie chart's
 - [x] Monthly spending trend chart (now "Monthly Spending & Savings Trend", two lines)
 - [x] `analytics.py`: shared chronological month-sorting + savings-rate calculation, used by both
       the Dashboard and Chat (previously duplicated, buggy logic — now one source of truth)
@@ -466,6 +469,20 @@ mention, and replaced the hardcoded "935 transactions" snapshot with a pointer t
 count would just go stale again). Note: while testing, discovered Jonathan had independently uploaded
 several more real Santander statements himself in parallel (household transaction count reached 109,
 spanning Dec 2025-Jul 2026) - confirms the feature works for him beyond just my test upload.
+
+### 2026-07-20 (continued) — Dashboard/Personal Budget UI tweaks
+Two quick UI requests. Split the Dashboard's "Top 10 Merchants" table into "Top 10 Spend" and
+"Top 10 Save" (same Savings & Investments category split already used by the trend chart), sharing
+one time-range filter independent of the pie chart's own filter — previously savings-pot transfers
+like "To Emergency Fund" crowded the same top-10 list as real merchants like Tesco. Verified both
+tables and the shared filter work correctly and independently from the pie chart's filter.
+
+Moved Personal Budget's "Money Left Over" card to the top of the page (above Money In) and renamed
+it "Overview" - required hoisting the `total_income = get_personal_total_income()` fetch above all
+the cards (previously fetched inside the Money In/Income card, which the summary card depended on
+being rendered first) rather than just moving the card and leaving a dangling reference. Verified
+live: all four figures (Total expenses, Income minus expenses, Money per week, Actual monthly spend)
+render correctly at the top, and the income input card below still works normally.
 
 ---
 

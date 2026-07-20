@@ -395,15 +395,41 @@ if page == "Dashboard":
                 st.plotly_chart(fig_pie, use_container_width=True)
 
         with col_merchants, st.container(border=True, key="card_dashboard_merchants"):
-            st.subheader("Top 10 Merchants")
-            merchant_totals = spending.groupby('Description').agg(
-                Category=('Category', 'first'),
-                Total=('Amount', 'sum'),
-                Transactions=('Amount', 'count')
-            ).sort_values('Total', ascending=False).head(10).reset_index()
-            merchant_totals.columns = ['Merchant', 'Category', 'Total', 'Transactions']
-            merchant_totals['Total'] = merchant_totals['Total'].apply(lambda x: f"£{x:,.2f}")
-            st.dataframe(merchant_totals, use_container_width=True, hide_index=True)
+            st.subheader("Top Merchants")
+            merchants_cutoff = render_time_filter("dashboard_merchants")
+            merchants_spending = (
+                spending[spending['DateParsed'] >= merchants_cutoff] if merchants_cutoff else spending
+            )
+
+            # Same Spend/Save split as the trend chart below - a merchant
+            # you're paying into a savings pot isn't "spending" in the same
+            # sense as a real purchase, so they read better as two separate
+            # top-10 lists rather than one list where big pot transfers
+            # crowd out real merchants.
+            spend_only = merchants_spending[merchants_spending['Category'] != 'Savings & Investments']
+            save_only = merchants_spending[merchants_spending['Category'] == 'Savings & Investments']
+
+            def top_merchants_table(subset):
+                totals = subset.groupby('Description').agg(
+                    Category=('Category', 'first'),
+                    Total=('Amount', 'sum'),
+                    Transactions=('Amount', 'count')
+                ).sort_values('Total', ascending=False).head(10).reset_index()
+                totals.columns = ['Merchant', 'Category', 'Total', 'Transactions']
+                totals['Total'] = totals['Total'].apply(lambda x: f"£{x:,.2f}")
+                return totals
+
+            st.markdown("**Top 10 Spend**")
+            if spend_only.empty:
+                st.write("No spending data for this period.")
+            else:
+                st.dataframe(top_merchants_table(spend_only), use_container_width=True, hide_index=True)
+
+            st.markdown("**Top 10 Save**")
+            if save_only.empty:
+                st.write("No savings data for this period.")
+            else:
+                st.dataframe(top_merchants_table(save_only), use_container_width=True, hide_index=True)
 
         # --- Month by Month Trend ---
         with st.container(border=True, key="card_dashboard_trend"):
@@ -874,6 +900,37 @@ elif page == "Personal Budget":
         get_personal_total_income, set_personal_total_income
     )
 
+    total_income = get_personal_total_income()
+
+    with st.container(border=True, key="card_personal_summary"):
+        st.subheader("Overview")
+        total_expenses = get_personal_total_expenses()
+        income_minus_expenses = total_income - total_expenses
+        money_per_week = income_minus_expenses / 4
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total expenses", f"£{total_expenses:,.2f}")
+        with col2:
+            st.metric("Income minus expenses", f"£{income_minus_expenses:,.2f}")
+        with col3:
+            st.metric("Money per week", f"£{money_per_week:,.2f}")
+        with col4:
+            from analytics import calculate_avg_monthly_spend
+            from database import load_all_transactions
+            actual_spend = calculate_avg_monthly_spend(load_all_transactions())
+            gap = actual_spend - total_expenses
+            st.metric(
+                "Actual monthly spend (recent avg)",
+                f"£{actual_spend:,.2f}",
+                delta=f"£{gap:,.2f} vs budget",
+                delta_color="inverse",
+                help="Real average monthly outflow from your transactions, excluding Savings & "
+                     "Investments. If this is higher than Total expenses, something you're "
+                     "actually paying for isn't reflected in the Money Out list below - see "
+                     "Recurring Charges."
+            )
+
     with st.container(border=True, key="card_personal_money_in"):
         st.subheader("Money In")
         st.caption("Reference only - not summed into any total")
@@ -898,7 +955,6 @@ elif page == "Personal Budget":
             st.rerun()
 
     with st.container(border=True, key="card_personal_income"):
-        total_income = get_personal_total_income()
         new_total_income = st.number_input(
             "Total income (Minus sacrifice) (£)", min_value=0.0, step=1.0,
             value=total_income, key="personal_total_income_input"
@@ -929,35 +985,6 @@ elif page == "Personal Budget":
             replace_personal_section('Money Out', clean_items)
             st.success("Money Out saved")
             st.rerun()
-
-    with st.container(border=True, key="card_personal_summary"):
-        st.subheader("Money Left Over")
-        total_expenses = get_personal_total_expenses()
-        income_minus_expenses = total_income - total_expenses
-        money_per_week = income_minus_expenses / 4
-
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total expenses", f"£{total_expenses:,.2f}")
-        with col2:
-            st.metric("Income minus expenses", f"£{income_minus_expenses:,.2f}")
-        with col3:
-            st.metric("Money per week", f"£{money_per_week:,.2f}")
-        with col4:
-            from analytics import calculate_avg_monthly_spend
-            from database import load_all_transactions
-            actual_spend = calculate_avg_monthly_spend(load_all_transactions())
-            gap = actual_spend - total_expenses
-            st.metric(
-                "Actual monthly spend (recent avg)",
-                f"£{actual_spend:,.2f}",
-                delta=f"£{gap:,.2f} vs budget",
-                delta_color="inverse",
-                help="Real average monthly outflow from your transactions, excluding Savings & "
-                     "Investments. If this is higher than Total expenses, something you're "
-                     "actually paying for isn't reflected in the Money Out list below - see "
-                     "Recurring Charges."
-            )
 
     with st.container(border=True, key="card_personal_recurring"):
         st.subheader("Recurring Charges (last 3 months)")
