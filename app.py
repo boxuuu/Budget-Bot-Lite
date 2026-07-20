@@ -81,7 +81,90 @@ def parse_transactions(lines):
                     })
         else:
             i += 1
-    
+
+    return transactions
+
+def is_santander_date(text):
+    # e.g. "3rd Jun", "23rd Jun" - Santander's transaction rows never
+    # include a year, unlike Chase's "01 Jan 2026"
+    return bool(re.match(r'^\d{1,2}(st|nd|rd|th) [A-Za-z]{3}$', text))
+
+def is_plain_number(text):
+    # e.g. "35.00", "1,585.35" - no £ sign and no minus sign anywhere in
+    # Santander's extracted text, unlike Chase's "-£35.00"
+    return bool(re.match(r'^\d[\d,]*\.\d{2}$', text))
+
+def parse_santander_transactions(lines):
+    """Santander's statement layout differs from Chase's in three ways that
+    rule out reusing parse_transactions(): dates have no year (the year has
+    to be read from the "Your transactions X to Y" header instead), amounts
+    have no £ or minus sign, and whether a transaction is money in or out
+    isn't in the text at all - it has to be inferred by comparing each row's
+    running balance to the previous one."""
+    month_year_map = {}
+    section_start = None
+    for i, line in enumerate(lines):
+        m = re.match(
+            r'Your transactions (\d{1,2}\w{2}) (\w{3}) (\d{4}) to (\d{1,2}\w{2}) (\w{3}) (\d{4})',
+            line
+        )
+        if m:
+            month_year_map[m.group(2)] = m.group(3)
+            month_year_map[m.group(5)] = m.group(6)
+            section_start = i + 1
+            break
+
+    if section_start is None:
+        return []
+
+    transactions = []
+    previous_balance = None
+    i = section_start
+
+    while i < len(lines):
+        if is_santander_date(lines[i]):
+            date_text = lines[i]
+            i += 1
+
+            if i >= len(lines):
+                break
+            description = lines[i]
+            i += 1
+
+            # A real transaction row is Date, Description, Amount, Balance
+            # (2 numbers); the opening/closing "Balance brought/carried
+            # forward" rows are Date, Description, Balance only (1 number) -
+            # collecting up to 2 number-like lines distinguishes them.
+            numbers = []
+            while i < len(lines) and is_plain_number(lines[i]) and len(numbers) < 2:
+                numbers.append(lines[i])
+                i += 1
+
+            if len(numbers) == 2:
+                amount = float(numbers[0].replace(',', ''))
+                balance = float(numbers[1].replace(',', ''))
+
+                if previous_balance is not None and balance < previous_balance:
+                    signed_amount = -amount
+                else:
+                    signed_amount = amount
+
+                day = re.match(r'\d+', date_text).group()
+                month = date_text.split()[1]
+                year = month_year_map.get(month, '')
+                full_date = f"{int(day):02d} {month} {year}"
+
+                transactions.append({
+                    'Date': full_date,
+                    'Description': description,
+                    'Amount': f"{'-' if signed_amount < 0 else ''}£{abs(signed_amount):,.2f}"
+                })
+                previous_balance = balance
+            elif len(numbers) == 1:
+                previous_balance = float(numbers[0].replace(',', ''))
+        else:
+            i += 1
+
     return transactions
 
 # --- Sidebar ---
@@ -383,10 +466,17 @@ if page == "Dashboard":
 elif page == "Upload Statement":
     st.header("Upload Statement")
 
-    with st.container(border=True, key="card_upload_statement"):
-        st.write("Upload a bank statement PDF to add it to Budget Bot.")
+    from household_transactions import save_household_transactions
 
-        uploaded_file = st.file_uploader("Upload your bank statement", type="pdf")
+    col_personal, col_household = st.columns(2)
+
+    with col_personal, st.container(border=True, key="card_upload_personal"):
+        st.subheader("Personal (Chase)")
+        st.caption("Feeds the Dashboard, Personal Budget, and Chat.")
+
+        uploaded_file = st.file_uploader(
+            "Upload your Chase statement PDF", type="pdf", key="upload_personal_pdf"
+        )
 
         if uploaded_file is not None:
             pdf = fitz.open(stream=uploaded_file.read(), filetype="pdf")
@@ -403,11 +493,47 @@ elif page == "Upload Statement":
             if transactions:
                 st.success(f"Found {len(transactions)} transactions in this statement")
 
-                if st.button("Save to Budget Bot"):
+                if st.button("Save to Budget Bot", key="save_personal_statement"):
                     saved, skipped = save_transactions(transactions)
                     st.success(f"Saved {saved} new transactions. Skipped {skipped} duplicates.")
             else:
                 st.warning("No transactions found")
+
+    with col_household, st.container(border=True, key="card_upload_household"):
+        st.subheader("Household (Santander)")
+        st.caption(
+            "Kept in a completely separate table - never included in the Dashboard, Personal "
+            "Budget, or Chat. Only feeds the Household Budget page's Recurring Charges."
+        )
+
+        household_pdf = st.file_uploader(
+            "Upload your Santander statement PDF", type="pdf", key="upload_household_pdf"
+        )
+
+        if household_pdf is not None:
+            pdf = fitz.open(stream=household_pdf.read(), filetype="pdf")
+
+            lines = []
+            for page_num in pdf:
+                for line in page_num.get_text().split('\n'):
+                    line = line.strip()
+                    if line:
+                        lines.append(line)
+
+            parsed_household_transactions = parse_santander_transactions(lines)
+
+            if parsed_household_transactions:
+                st.success(f"Found {len(parsed_household_transactions)} transactions in this statement")
+
+                if st.button("Save to Household Budget", key="save_household_statement"):
+                    saved, skipped = save_household_transactions(parsed_household_transactions)
+                    st.success(f"Saved {saved} new transactions. Skipped {skipped} duplicates.")
+            else:
+                st.warning(
+                    "No transactions found. This can happen if the statement's date range isn't "
+                    "in the expected \"Your transactions X to Y\" format, or the PDF's text layout "
+                    "differs from what's been seen so far."
+                )
 
 # --- Net Worth Page ---
 elif page == "Net Worth":
@@ -964,6 +1090,113 @@ elif page == "Household Budget":
             st.metric("Jonny", f"£{jonny_share:,.2f}")
         with col2:
             st.metric("Steph", f"£{steph_share:,.2f}")
+
+    from household_transactions import (
+        load_all_household_transactions, get_household_transactions_db, HouseholdTransaction,
+        get_household_active_dismissals, dismiss_household_recurring_charge,
+        undismiss_household_recurring_charge
+    )
+    from analytics import calculate_avg_monthly_spend, get_recurring_charges
+    from categoriser import CATEGORIES
+
+    with st.container(border=True, key="card_household_categorise"):
+        st.caption("Upload Santander statements on the Upload Statement page.")
+        if st.button("Categorise uncategorised household transactions", key="categorise_household"):
+            with st.spinner("Categorising..."):
+                hdb = get_household_transactions_db()
+                rules, ai = categorise_all(hdb, HouseholdTransaction)
+                hdb.close()
+                st.success(f"Done. {rules} categorised by rules, {ai} by Ollama")
+
+    household_transactions_data = load_all_household_transactions()
+
+    if household_transactions_data:
+        with st.container(border=True, key="card_household_actual_spend"):
+            actual_spend = calculate_avg_monthly_spend(household_transactions_data)
+            gap = actual_spend - total
+            st.metric(
+                "Actual monthly spend (recent avg)",
+                f"£{actual_spend:,.2f}",
+                delta=f"£{gap:,.2f} vs budgeted Total",
+                delta_color="inverse",
+                help="Real average monthly outflow from uploaded Santander transactions. If "
+                     "higher than the budgeted Total above, something you're actually being "
+                     "charged for isn't reflected in the Household Bills list - see Recurring "
+                     "Charges below."
+            )
+
+        with st.container(border=True, key="card_household_recurring"):
+            st.subheader("Recurring Charges (last 3 months)")
+            st.caption(
+                "Merchants charged at least twice in the last 3 months of Santander transactions, "
+                "with their average amount. Not matched against the Household Bills list above - "
+                "compare it yourself. \"Add to budget\" adds it and marks it reviewed; \"Already "
+                "in budget\" / \"Not recurring\" just mark it reviewed. Reviewed items move below "
+                "for 6 months, then resurface automatically."
+            )
+
+            all_household_recurring = get_recurring_charges(household_transactions_data)
+            household_dismissals = get_household_active_dismissals()
+
+            household_cat_filter = st.selectbox(
+                "Filter by category", ["All categories"] + CATEGORIES, key="household_recurring_category_filter"
+            )
+            if household_cat_filter != "All categories":
+                all_household_recurring = [r for r in all_household_recurring if r['category'] == household_cat_filter]
+
+            household_to_review = [r for r in all_household_recurring if r['merchant'] not in household_dismissals]
+            household_reviewed = [r for r in all_household_recurring if r['merchant'] in household_dismissals]
+
+            if not household_to_review:
+                st.write("Nothing to review for this filter.")
+            else:
+                header = st.columns([2.6, 1.6, 0.9, 1.1, 1.1, 1.6, 1.6])
+                for col, label in zip(header, ["**Merchant**", "**Category**", "**Months**", "**Avg**", "", "", ""]):
+                    col.markdown(label)
+
+                for r in household_to_review:
+                    row = st.columns([2.6, 1.6, 0.9, 1.1, 1.1, 1.6, 1.6])
+                    row[0].write(r['merchant'])
+                    row[1].write(r['category'])
+                    row[2].write(f"{r['months_seen']}/3")
+                    row[3].write(f"£{r['avg_amount']:,.2f}")
+                    if row[4].button("Add", key=f"hh_add_{r['merchant']}", help="Add to Household Bills above"):
+                        current_items = get_household_items()
+                        current_items.append({
+                            'service': r['merchant'], 'provider': '', 'renewal_date': '',
+                            'amount': round(r['avg_amount'], 2)
+                        })
+                        replace_household_items(current_items)
+                        dismiss_household_recurring_charge(r['merchant'], 'already_budgeted')
+                        st.success(f"Added '{r['merchant']}' to Household Bills")
+                        st.rerun()
+                    if row[5].button(
+                        "In budget", key=f"hh_inbudget_{r['merchant']}",
+                        help="Already covered by an existing (differently named) Household Bills row"
+                    ):
+                        dismiss_household_recurring_charge(r['merchant'], 'already_budgeted')
+                        st.rerun()
+                    if row[6].button(
+                        "Not recurring", key=f"hh_notrec_{r['merchant']}",
+                        help="Not really a regular bill or subscription"
+                    ):
+                        dismiss_household_recurring_charge(r['merchant'], 'not_recurring')
+                        st.rerun()
+
+            if household_reviewed:
+                with st.expander(f"Reviewed ({len(household_reviewed)}) - resurfaces automatically after 6 months"):
+                    for r in household_reviewed:
+                        info = household_dismissals[r['merchant']]
+                        reason_label = "Already in budget" if info['reason'] == 'already_budgeted' else "Not recurring"
+                        dismissed_date = info['dismissed_at'].strftime('%d %b %Y')
+                        rcol = st.columns([2.6, 1.6, 1.1, 2, 1.6])
+                        rcol[0].write(r['merchant'])
+                        rcol[1].write(r['category'])
+                        rcol[2].write(f"£{r['avg_amount']:,.2f}")
+                        rcol[3].write(f"{reason_label} · {dismissed_date}")
+                        if rcol[4].button("Un-dismiss", key=f"hh_undismiss_{r['merchant']}"):
+                            undismiss_household_recurring_charge(r['merchant'])
+                            st.rerun()
 
 # --- View Transactions Page ---
 elif page == "View Transactions":

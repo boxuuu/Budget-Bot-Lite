@@ -77,6 +77,14 @@ KNOWN_RULES = {
     "homeprotect": "Insurance & Finance",
     "surewise": "Insurance & Finance",
     "house acc": "Rent & Housing",
+    # Household (Santander) account rules - map directly to existing
+    # Household Bills line items (Energy: Octopus, Mortgage: Nationwide,
+    # Council Tax: Manchester Council)
+    "octopus": "Bills & Utilities",
+    "nationwide b s": "Rent & Housing",
+    "manchester c c": "Bills & Utilities",
+    "united utilities": "Bills & Utilities",
+    "jd plumbing": "Bills & Utilities",
     "wedding": "Savings & Investments",
     "emergency fund": "Savings & Investments",
     "fun money": "Savings & Investments",

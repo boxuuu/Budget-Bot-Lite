@@ -79,6 +79,15 @@ important than visual polish, though both have had real investment.
 - [x] Household Budget page: bills grid (service/provider/renewal date/amount), computed total,
       editable % split between the two people in the household
 - [x] `budget.py` module: `PersonalBudgetItem`, `HouseholdBudgetItem`, `BudgetSetting` models
+- [x] Household Budget: Actual-spend gap + Recurring Charges checklist, mirroring Personal Budget's
+      (2026-07-17), sourced from a new, completely separate `HouseholdTransaction` table
+      (`household_transactions.py`) for the joint Santander account — structurally isolated from
+      Jonathan's personal Chase data, never touched by the Dashboard/Personal Budget/Chat
+- [x] Santander statement support: a dedicated `parse_santander_transactions` parser (Santander's
+      layout differs from Chase's enough that reusing `parse_transactions` wasn't viable — no year on
+      dates, no £/minus sign on amounts, money in/out inferred from balance movement), tested and
+      verified against Jonathan's real statement. Upload Statement page now has two side-by-side
+      boxes, Personal (Chase) and Household (Santander) (2026-07-20)
 
 ### Stage 4 — Dashboard & Analytics
 - [x] KPI row: Net Worth, Total Spent, Monthly Average, Savings Rate
@@ -183,8 +192,9 @@ parked Stage 8 discussion above for the same concern applied to Household Budget
 **~95% complete** on the original 8-stage plan. Stage 7 fully done and pushed. Stage 8 has one
 concrete win (Dashboard trend chart split into Spending vs Savings lines) and one deliberately
 parked decision (budget targets vs actuals — Jonathan is happy with raw data access instead, see
-Known Issues). Separately, outside the original 8 stages: the recurring-charges checklist (Suggested
-Features above) is built and verified in the real app, not yet pushed.
+Known Issues). Outside the original 8 stages: the recurring-charges checklist (Suggested Features
+above) is built for both Personal and Household Budget, and the app now supports two separate bank
+accounts (Chase personal, Santander household) with fully isolated data.
 
 ## 8. Known Issues
 
@@ -211,8 +221,19 @@ Features above) is built and verified in the real app, not yet pushed.
   reflecting this transfer rather than pure growth. No code change made (would need a way to tag a
   specific value change as "transfer, exclude from growth rate," which doesn't exist) — revisit only
   if per-asset projections become something Jonathan actually uses regularly.
-- **PDF parser scope**: tuned specifically for Chase UK statement format — pre-existing, documented
-  limitation, not something to fix unless a new statement format needs supporting.
+- **Two PDF parsers now, not one**: `parse_transactions` (Chase) and `parse_santander_transactions`
+  (Santander, added 2026-07-20) are separate functions tuned for each bank's specific layout — don't
+  assume one works for the other's statements, and don't try to unify them (the formats differ enough
+  — year-less dates, sign-less amounts inferred from balance movement on Santander's side — that a
+  shared parser would be more fragile than two focused ones).
+- **No manual category-correction UI for household transactions yet**: Chase transactions have the
+  Manage Categories page (browse, filter, manually correct); household Santander transactions only
+  have the "Categorise uncategorised household transactions" button on the Household Budget page —
+  no equivalent browse/correct page. A few of Jonathan's real household transactions came back
+  miscategorised after the first real upload (2026-07-20) — e.g. "DREAMS LTD" (a bed/mattress
+  retailer, matches the "Mattress" Household Bills item) landed in "Other", "BLINDS 2GO" landed in
+  "Subscriptions" instead of "Shopping" — normal Ollama imperfection, same as Chase's, but there's
+  currently no page to fix it from. Worth building if this comes up as a recurring annoyance.
 - **Savings & Investments netting scope**: applies to the Savings Rate KPI, Chat's context, and the
   Dashboard trend chart's "Savings & Investments" line — but deliberately *not* to the Dashboard's
   other general spending views (Total Spent, pie chart, top merchants), which stay gross/unmodified
@@ -234,10 +255,14 @@ Features above) is built and verified in the real app, not yet pushed.
 
 ## 9. Next Actions
 
-1. Nothing currently blocking. Dashboard filters, Net Worth growth column, and the Savings Rate/Fun
-   Money fix are all built and verified. Resurface the four remaining Suggested Features ideas (§6)
-   if Jonathan asks what's on the plan — none are committed to yet.
-2. *(Low priority, only if it comes up)* If Jonathan starts using per-pension projections regularly,
+1. Nothing currently blocking. Dashboard filters, Net Worth growth column, Savings Rate/Fun Money
+   fix, and Household Budget's Santander support are all built and verified against real data.
+   Resurface the four remaining Suggested Features ideas (§6) if Jonathan asks what's on the plan —
+   none are committed to yet.
+2. *(Only if it becomes a recurring annoyance)* Build a Manage Categories equivalent for household
+   transactions — currently only a "Categorise uncategorised" button, no way to browse/manually
+   correct like Chase transactions can.
+3. *(Low priority, only if it comes up)* If Jonathan starts using per-pension projections regularly,
    revisit the Mar 2025 pension-transfer distortion noted in Known Issues — would need a way to tag a
    specific asset-value change as "transfer" so it's excluded from that asset's growth rate.
 
@@ -398,6 +423,49 @@ in the browser (tile now reads +38%, £1,426/mo, green) and via a hover screensh
 tooltip. Committed as two separate commits (Net Worth growth column; Savings Rate/Fun Money fix) via
 a manual `git add -p` split of `app.py`, kept logically separate despite landing in the same session.
 Not yet pushed.
+
+### 2026-07-20 — Household Budget gets its own account: Santander support
+Jonathan wanted the expanded subscription-audit/recurring-charges pattern (built for Personal Budget
+on 2026-07-16) added to Household Budget too — but the household spending lives on a separate
+Santander account, and he was explicit it must never mix with his personal Chase data. Presented two
+architectures (shared table with an account tag, vs a fully separate table) and he picked the
+separate-table approach for a structural isolation guarantee rather than relying on remembering a
+filter everywhere. Built `household_transactions.py`: a new `HouseholdTransaction` table plus its own
+`HouseholdRecurringChargeDismissal` table (kept separate from `budget.RecurringChargeDismissal` too,
+so a Personal dismissal can't suppress a Household one or vice versa). `categoriser.categorise_all`/
+`recategorise_all` and `analytics.calculate_avg_monthly_spend`/`get_recurring_charges` all turned out
+to already be generic (duck-typed on shared attribute names), so no changes needed there. Added the
+same Actual-spend-gap + Recurring-Charges-checklist UI to the Household Budget page. Verified
+end-to-end with synthetic data (add/dismiss/undismiss all worked) and confirmed zero leakage into the
+personal `Transaction` table, then cleaned the synthetic data up.
+
+First real upload failed ("No transactions found") - Jonathan shared his actual (real) Santander
+statement to debug against. Investigation found Santander's layout is structurally different from
+Chase's in three ways: transaction dates have no year at all (e.g. "23rd Jun", year only appears once
+in a "Your transactions X to Y" header), amounts have no £ or minus sign, and whether a transaction
+is money in or out isn't in the text at all - it has to be inferred by comparing each row's running
+balance to the previous one. Built a dedicated `parse_santander_transactions` parser rather than
+patching the Chase one (the formats are too different to share cleanly) and verified it against
+Jonathan's real statement: all 21 transactions parsed correctly, uploaded via the real app UI, and
+saved. While reviewing the categorisation results, found 4 real rule gaps that map directly to
+existing Household Bills items (Octopus energy, Nationwide mortgage, Manchester council tax, JD
+Plumbing) and added them to `categoriser.py`, then re-ran categorisation on the real household data.
+Reconfirmed isolation held with this real data too (zero Santander descriptions found in the personal
+table).
+
+Jonathan then asked to reorganise the upload UI: move the Santander upload out of the Household
+Budget page and onto the existing Upload Statement page, as a second box alongside the Chase one.
+Restructured Upload Statement into two side-by-side cards ("Personal (Chase)" / "Household
+(Santander)"); Household Budget keeps just the categorise button plus the Actual-spend/Recurring-
+Charges analysis. Verified the moved upload still works (still finds 21 transactions from the new
+location) and that duplicate detection correctly prevents re-saving. Also updated `claude.md`
+(previously only updated as part of session end, not mid-session) since it had gone stale in several
+places this session touched directly - new `household_transactions.py` module entry, updated Pages
+section, added the two new dismissal-table model docs, fixed a stale "Fun Money is a savings pot"
+mention, and replaced the hardcoded "935 transactions" snapshot with a pointer to PLAN.md (a specific
+count would just go stale again). Note: while testing, discovered Jonathan had independently uploaded
+several more real Santander statements himself in parallel (household transaction count reached 109,
+spanning Dec 2025-Jul 2026) - confirms the feature works for him beyond just my test upload.
 
 ---
 

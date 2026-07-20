@@ -6,7 +6,9 @@
 ## What this is
 Budget Bot is a personal finance app built in Python/Streamlit for Jonathan Cummins, based in Manchester, UK.
 It runs entirely locally on a MacBook Air M3 (24GB RAM) and uses Ollama for local LLM capabilities.
-The app parses Chase bank statement PDFs, stores transactions in a local SQLite database, categorises
+The app parses bank statement PDFs from two separate accounts — Jonathan's personal Chase card and
+the household's joint Santander account, kept in completely separate database tables so household
+data never affects personal figures — stores transactions in a local SQLite database, categorises
 them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net worth tracker.
 
 ## Tech stack
@@ -22,12 +24,22 @@ them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net
 
 ## Project structure
 - `app.py` — main Streamlit app, all pages and navigation
-- `database.py` — SQLite models and transaction functions (Transaction model)
-- `categoriser.py` — merchant categorisation logic using known rules + Ollama fallback (with ddgs web search context)
+- `database.py` — SQLite models and transaction functions (Transaction model — Jonathan's personal
+  Chase transactions only)
+- `household_transactions.py` — a completely separate table/pipeline for the household's joint
+  Santander account (HouseholdTransaction, HouseholdRecurringChargeDismissal models) — deliberately
+  isolated from `database.py` so it's structurally impossible for household data to leak into the
+  Dashboard, Personal Budget, or Chat, which only ever query `database.Transaction`
+- `categoriser.py` — merchant categorisation logic using known rules + Ollama fallback (with ddgs web
+  search context); `categorise_all`/`recategorise_all` take the Transaction model class as a
+  parameter, so the same logic works for both `database.Transaction` and
+  `household_transactions.HouseholdTransaction`
 - `networth.py` — net worth/asset tracking models and functions (AssetValue model)
 - `budget.py` — personal and household budget models and functions (PersonalBudgetItem, HouseholdBudgetItem, BudgetSetting)
 - `analytics.py` — shared cross-page calculations: chronological month-sorting, savings-rate
-  calculation (net of savings-pot transfers), used by both the Dashboard and Chat
+  calculation, recurring-charge detection, used by the Dashboard, Chat, Personal Budget, and
+  Household Budget (works on either Transaction table, since it only relies on shared attribute
+  names — date/description/amount/category/month)
 - `chat.py` — Ollama chat interface with spending context and tool-calling for category/net worth updates
 - `.streamlit/config.toml` — theme config (brand accent colour only, so the native light/dark/system
   toggle keeps working)
@@ -35,14 +47,29 @@ them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net
 - `start.sh` — shell script to launch the app
 
 ## Pages (sidebar navigation)
-1. **Dashboard** — KPI row (Net Worth, Total Spent, Monthly Average, Savings Rate), category pie
-   chart (top 6 categories + "Other categories"), Top 10 Merchants table, monthly spending trend chart
-2. **Net Worth** — asset tracking with time-series graphs, imported from Worth It app export
-3. **Personal Budget** — live-editable Money In/Money Out grids, manually-entered total income (minus salary sacrifice), and computed income-minus-expenses/money-per-week figures
-4. **Household Budget** — live-editable bills grid (service, provider, renewal date, amount) with a computed total, and an editable percentage split between the two people in the household
-5. **Upload Statement** — PDF upload and transaction parsing for Chase bank statements
-6. **View Transactions** — full transaction table with month, merchant, and category filters and categorisation buttons
-7. **Manage Categories** — review and correct merchant categories
+1. **Dashboard** — KPI row (Net Worth, Total Spent, Monthly Average, Savings Rate — shown as a
+   percentage with the £/mo as a secondary delta), category pie chart and monthly Spending & Savings
+   trend chart (both with independent All/1yr/YTD/6mo/1mo time filters, matching the Net Worth page's
+   pattern), Top 10 Merchants table
+2. **Net Worth** — asset tracking with time-series graphs, imported from Worth It app export, a
+   per-asset Growth % column on the main Assets list (colour-coded, follows the page's time filter)
+3. **Personal Budget** — live-editable Money In/Money Out grids, manually-entered total income (minus
+   salary sacrifice), computed income-minus-expenses/money-per-week figures, a real "Actual monthly
+   spend" figure from transactions (not just the manual budget total), and a Recurring Charges
+   checklist (merchants paid ≥2 of the last 3 months, with Add to budget / dismiss actions — dismissals
+   expire after 6 months rather than hiding a merchant forever)
+4. **Household Budget** — live-editable bills grid (service, provider, renewal date, amount) with a
+   computed total and an editable % split, the same Actual-spend/Recurring-Charges pattern as
+   Personal Budget but sourced from the separate Santander `HouseholdTransaction` table, and a
+   "Categorise uncategorised household transactions" button
+5. **Upload Statement** — two side-by-side upload boxes: Personal (Chase, feeds the Dashboard/
+   Personal Budget/Chat) and Household (Santander, feeds only the Household Budget page). Santander's
+   PDF layout is different enough from Chase's (no year on dates, no £/minus sign on amounts, money
+   in/out direction inferred from balance movement rather than read from the text) that it has its
+   own parser, `parse_santander_transactions`, rather than reusing Chase's `parse_transactions`
+6. **View Transactions** — full transaction table with month, merchant, and category filters and
+   categorisation buttons (personal Chase transactions only)
+7. **Manage Categories** — review and correct merchant categories (personal Chase transactions only)
 
 There is no standalone Chat page — the chat interface (natural language questions, category
 fixes, and net worth updates, with a Confirm/Cancel click required before writing to the database)
@@ -54,6 +81,18 @@ for scrollable message history.
 ## Database models
 ### Transaction (database.py)
 - id, date (String), description (String), amount (Float), category (String), month (String)
+- Jonathan's personal Chase card only.
+
+### HouseholdTransaction (household_transactions.py)
+- Same shape as Transaction (id, date, description, amount, category, month), but a completely
+  separate table for the joint Santander account. Nothing outside `household_transactions.py` and
+  the Household Budget page queries this table.
+
+### HouseholdRecurringChargeDismissal (household_transactions.py)
+- id, merchant (String), reason (String — 'already_budgeted' or 'not_recurring'), dismissed_at (DateTime)
+- Mirrors `budget.RecurringChargeDismissal` but kept in a separate table so dismissing a merchant on
+  the Household Recurring Charges checklist can never suppress it on the Personal one. Dismissals
+  expire after 6 months (`DISMISSAL_EXPIRY_DAYS`) rather than lasting forever.
 
 ### AssetValue (networth.py)
 - id, asset_name (String), tag (String), value (Float), recorded_at (DateTime)
@@ -75,17 +114,27 @@ for scrollable message history.
 - Generic key/value table. Two keys in use: `personal_total_income` (manual override for Personal
   Budget) and `household_split_percent` (editable % split between the two people in the household).
 
+### RecurringChargeDismissal (budget.py)
+- id, merchant (String), reason (String — 'already_budgeted' or 'not_recurring'), dismissed_at (DateTime)
+- Backs Personal Budget's Recurring Charges checklist. Same shape/purpose as
+  `household_transactions.HouseholdRecurringChargeDismissal`, kept as a separate table for the same
+  reason (so Personal and Household dismissals never cross-contaminate).
+
 ## Categories used
 Salary, Groceries, Eating Out & Takeaway, Coffee & Beans, Shopping, Transport, Health & Fitness,
 Subscriptions, Phone & Internet, Insurance & Finance, Savings & Investments, Charity,
 Bills & Utilities, Rent & Housing, Other
 
 Salary is income only (identified via "From B E" transactions) and is never included in spending
-totals. Savings & Investments figures used for the Savings Rate calculation (Dashboard KPI and Chat)
-are net of transfers to/from Jonathan's named savings pots (Fun Money, Round up, Emergency Fund,
-Wedding, Overflow) — money moving back out of a pot reduces the figure rather than being invisible.
-This netting applies only to the Savings Rate calculation, not to the Dashboard's general spending
-views (pie chart, Total Spent, trend chart), which stay gross/unmodified by design.
+totals. Savings & Investments figures used for the Savings Rate calculation (Dashboard KPI, the
+trend chart's Savings line, and Chat) are net of transfers to/from Jonathan's named savings pots
+(Round up, Emergency Fund, Wedding, Overflow) — money moving back out of a pot reduces the figure
+rather than being invisible. Fun Money is excluded entirely, in both directions, since it behaves as
+a discretionary spending buffer rather than genuine savings, not a store of value — including it
+made the Savings Rate KPI swing deeply negative most months despite otherwise strong, consistent
+saving. This treatment applies only to the Savings Rate/trend-line calculation, not to the
+Dashboard's general spending views (pie chart, Total Spent, top merchants), which stay
+gross/unmodified by design.
 
 ## Coding preferences
 - No emojis anywhere in the UI
@@ -97,17 +146,21 @@ views (pie chart, Total Spent, trend chart), which stay gross/unmodified by desi
 - Ollama must be running separately for LLM features to work
 
 ## Current data
-- 935 transactions loaded from January to June 2026 (Chase bank statements)
+- Personal Chase transactions grow as Jonathan uploads statements via the Upload Statement page's
+  "Personal (Chase)" box — see PLAN.md for the current count and date range at any point in time.
+- Household Santander transactions grow the same way via the "Household (Santander)" box — a
+  completely separate table, see `household_transactions.py`.
 - Net worth data imported from Worth It app export going back to 2024
 - Assets tracked: Private Pension (AJ Bell), Emergency Fund, Barclays Shares (Equate),
   Coinbase, Stocks & Shares ISA (AJ Bell), Workplace Pension (L&G)
 
 ## Known issues to be aware of
 - Duplicate widget key errors: always add unique key= arguments to all Streamlit widgets
-- Ollama context window: do not send all 935 raw transactions to Ollama at once,
-  use summaries instead
-- PDF parser is tuned for Chase UK statement format specifically
+- Ollama context window: do not send all raw transactions to Ollama at once, use summaries instead
+- Chase's PDF parser (`parse_transactions`) is tuned for Chase UK statement format specifically;
+  Santander's (`parse_santander_transactions`) is a separate parser tuned for Santander's format —
+  don't assume one works for the other's PDFs
 
-## What to build next
-- Budget targets vs actuals on the Dashboard
-- Month-on-month comparison charts
+## Current focus
+See `PLAN.md` §8/§9 for the up-to-date priority list and what's already built — this file covers
+architecture/structure, not current status.
