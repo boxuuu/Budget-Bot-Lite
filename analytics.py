@@ -7,6 +7,21 @@ def month_sort_key(month_label):
     Parse it into a real date so 'most recent month' actually means that."""
     return datetime.strptime(month_label, '%b %Y')
 
+def get_upload_checklist(existing_months, start_month="Jan 2026"):
+    """List of (month_label, uploaded) tuples from start_month through the
+    current month inclusive, e.g. [('Jan 2026', True), ('Feb 2026', False), ...].
+    The end of the range is always "today's month", recomputed on every call -
+    not stored - so the checklist grows by itself over time and a month is
+    never dropped once it appears, even if it's still missing a statement."""
+    cursor = month_sort_key(start_month)
+    current = datetime.now().replace(day=1)
+    checklist = []
+    while cursor <= current:
+        label = cursor.strftime('%b %Y')
+        checklist.append((label, label in existing_months))
+        cursor = datetime(cursor.year + 1, 1, 1) if cursor.month == 12 else datetime(cursor.year, cursor.month + 1, 1)
+    return checklist
+
 # Jonathan's named savings pots - money going TO these is a real saving,
 # money coming FROM them back to the main account is money he already
 # owned returning, not new income or new spending. Scoped explicitly to

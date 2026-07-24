@@ -484,6 +484,24 @@ being rendered first) rather than just moving the card and leaving a dangling re
 live: all four figures (Total expenses, Income minus expenses, Money per week, Actual monthly spend)
 render correctly at the top, and the income input card below still works normally.
 
+### 2026-07-24 — Statements Uploaded checklist on Upload Statement page
+Jonathan wanted a way to see at a glance which months' statements he'd already uploaded, starting
+from Jan 2026, worried that a missed month might silently fall off the list. Recommended and agreed
+the range should run from Jan 2026 to the current month, recomputed live (not a fixed end date) -
+this satisfies "never disappears" for free, since the start never moves and the end only ever grows
+forward, so a missing month stays visible (unticked) indefinitely until actually uploaded.
+
+Added `analytics.get_upload_checklist(existing_months, start_month)`, returning
+`[(month_label, uploaded_bool), ...]` for Jan 2026 through today's month; added
+`household_transactions.get_household_months()` (mirroring `database.get_months()`, which already
+existed). Added a new "Statements Uploaded" section to the Upload Statement page, below the two
+upload cards, mirroring their Personal/Household two-column split - each side is its own card listing
+one row per month with a disabled `st.checkbox` (native tick, no emoji, per CLAUDE.md) ticked if any
+transaction exists for that month. Verified live in the browser against real data: Personal (Chase)
+correctly shows Jul 2026 unticked (no July Chase statement uploaded yet) while Jun and earlier are
+ticked; Household (Santander) shows all months through July ticked, matching the real upload history
+noted in the 2026-07-20 session log. No console errors.
+
 ---
 
 ## Maintenance convention

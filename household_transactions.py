@@ -86,6 +86,12 @@ def load_all_household_transactions():
     db.close()
     return transactions
 
+def get_household_months():
+    db = get_household_transactions_db()
+    months = db.query(HouseholdTransaction.month).distinct().all()
+    db.close()
+    return [m[0] for m in months]
+
 def get_household_active_dismissals():
     db = get_household_transactions_db()
     cutoff = datetime.utcnow() - timedelta(days=DISMISSAL_EXPIRY_DAYS)

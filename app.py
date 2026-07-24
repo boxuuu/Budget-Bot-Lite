@@ -561,6 +561,29 @@ elif page == "Upload Statement":
                     "differs from what's been seen so far."
                 )
 
+    from household_transactions import get_household_months
+    from analytics import get_upload_checklist
+
+    st.subheader("Statements Uploaded")
+    st.caption(
+        "Jan 2026 to the current month. A month never disappears once it appears here, even if "
+        "it's still missing - so a gap stays visible for you to catch up on."
+    )
+
+    col_personal_checklist, col_household_checklist = st.columns(2)
+
+    with col_personal_checklist, st.container(border=True, key="card_upload_checklist_personal"):
+        st.markdown("**Personal (Chase)**")
+        personal_checklist = get_upload_checklist(get_months())
+        for month_label, uploaded in personal_checklist:
+            st.checkbox(month_label, value=uploaded, disabled=True, key=f"check_personal_{month_label}")
+
+    with col_household_checklist, st.container(border=True, key="card_upload_checklist_household"):
+        st.markdown("**Household (Santander)**")
+        household_checklist = get_upload_checklist(get_household_months())
+        for month_label, uploaded in household_checklist:
+            st.checkbox(month_label, value=uploaded, disabled=True, key=f"check_household_{month_label}")
+
 # --- Net Worth Page ---
 elif page == "Net Worth":
     st.header("Net Worth")
