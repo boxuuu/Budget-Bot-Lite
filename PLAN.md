@@ -502,6 +502,22 @@ correctly shows Jul 2026 unticked (no July Chase statement uploaded yet) while J
 ticked; Household (Santander) shows all months through July ticked, matching the real upload history
 noted in the 2026-07-20 session log. No console errors.
 
+### 2026-07-31 — Split Net Worth's actual and projected lines into separate charts
+Jonathan disliked that the Net Worth page's "Total Assets Over Time" chart overlaid the 5-year
+projected line on the same axes as actual history - the projection is always anchored on full,
+unfiltered history and runs 5 years forward regardless of the time-range filter selected on the
+actual line, so a narrow view (e.g. "1 Month") still shared an axis with a projection that could
+reach into the hundreds of thousands, squashing the real, meaningful movement flat. Presented three
+options (separate charts, a show/hide toggle, or a locked y-axis range on one shared chart); Jonathan
+picked separate charts. Split "Total Assets Over Time" (now actual-only, respects the time filter,
+autoscales properly - verified live that "1 Month" now shows a readable £207,000-£208,000 range
+instead of a flat line) from a new "Net Worth Projection" card below it, which always shows full
+history + the dashed projected line together on its own dedicated axis, independent of the page's
+time filter (as the projection always was). Verified both live in the browser: the main chart at
+"All" shows the full £100k-£207k climb in detail, the projection card shows actual + a ~50%/yr dashed
+line out to 2031, and the "1 Month" filter now genuinely zooms in rather than being dwarfed by the
+projection. No console errors.
+
 ---
 
 ## Maintenance convention

@@ -793,7 +793,7 @@ elif page == "Net Worth":
                 daily_total, x='Date', y='Total',
                 labels={'Total': 'Total Assets (£)', 'Date': ''},
             )
-            fig_total.update_traces(line_color='#1D9E75', line_width=2, name='Actual', showlegend=True)
+            fig_total.update_traces(line_color='#1D9E75', line_width=2)
             fig_total.update_layout(
                 yaxis_tickprefix='£',
                 yaxis_tickformat=',.0f',
@@ -802,20 +802,42 @@ elif page == "Net Worth":
                 margin=dict(l=0, r=0, t=0, b=0)
             )
 
-            # --- Projected trend line ---
-            # Anchored on the TRUE latest total from full history (via
-            # project_net_worth), never on the filtered daily_total above - the
-            # growth rate and starting point must not depend on which time
-            # filter the user has selected on this page.
+            st.plotly_chart(fig_total, use_container_width=True)
+
+        # --- Net worth projection ---
+        # Deliberately a separate chart/card from Total Assets Over Time above,
+        # not an overlay on it - the projection is anchored on the TRUE latest
+        # total from full history (via project_net_worth) and always runs
+        # PROJECTION_YEARS forward regardless of the time filter selected above,
+        # so sharing one linear axis with a filtered actual-history line (e.g.
+        # "1 Month") squashed the actual line flat. Kept in its own card, on its
+        # own axis, so neither view distorts the other.
+        with st.container(border=True, key="card_nw_projection"):
+            st.subheader("Net Worth Projection")
+
+            full_daily_total = get_total_net_worth_series()
             projection = project_net_worth(years=PROJECTION_YEARS)
 
             if projection['ok']:
+                fig_proj = px.line(
+                    full_daily_total, x='Date', y='Total',
+                    labels={'Total': 'Total Assets (£)', 'Date': ''},
+                )
+                fig_proj.update_traces(line_color='#1D9E75', line_width=2, name='Actual', showlegend=True)
+                fig_proj.update_layout(
+                    yaxis_tickprefix='£',
+                    yaxis_tickformat=',.0f',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    margin=dict(l=0, r=0, t=0, b=0)
+                )
+
                 anchor_ts = pd.Timestamp(projection['anchor_date'])
                 rate = projection['rate']
                 future_dates = [anchor_ts + pd.DateOffset(years=yr) for yr in range(PROJECTION_YEARS + 1)]
                 future_values = [projection['anchor_value'] * (1 + rate) ** yr for yr in range(PROJECTION_YEARS + 1)]
 
-                fig_total.add_trace(go.Scatter(
+                fig_proj.add_trace(go.Scatter(
                     x=future_dates, y=future_values,
                     mode='lines',
                     line=dict(color='#1D9E75', width=2, dash='dash'),
@@ -823,15 +845,13 @@ elif page == "Net Worth":
                     name=f'Projected ({rate*100:.1f}%/yr)'
                 ))
 
-            st.plotly_chart(fig_total, use_container_width=True)
+                st.plotly_chart(fig_proj, use_container_width=True)
 
-            if projection['ok']:
                 st.caption(
                     f"Dashed line: a rough {PROJECTION_YEARS}-year projection based on your full asset "
-                    f"history (independent of the filter buttons above), assuming your historical blended "
-                    f"growth rate of {projection['rate']*100:.1f}%/year continues. This rate reflects both "
-                    f"market performance and your own contributions over time - it is not a pure investment "
-                    f"return, and it is not a guarantee of future results."
+                    f"history, assuming your historical blended growth rate of {projection['rate']*100:.1f}%/year "
+                    f"continues. This rate reflects both market performance and your own contributions over "
+                    f"time - it is not a pure investment return, and it is not a guarantee of future results."
                 )
             else:
                 st.caption("Not enough net worth history yet to show a projection.")
