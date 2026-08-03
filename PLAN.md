@@ -518,6 +518,79 @@ time filter (as the projection always was). Verified both live in the browser: t
 line out to 2031, and the "1 Month" filter now genuinely zooms in rather than being dwarfed by the
 projection. No console errors.
 
+### 2026-08-01 — Visual polish pass: typography, icons, card/button/nav refinement
+Jonathan said the app looked "a bit dull" and asked what could be done, given it's plain Streamlit
+with no design system beyond the existing card layout and brand accent color. Presented five levers
+(CSS refinement, richer config.toml theming, icons, native nav restructuring, chart-template polish)
+with tradeoffs; agreed to start with CSS + icons since both are zero-new-dependency and don't touch
+the light/dark/system toggle CLAUDE.md protects, leaving the bigger nav restructuring for later if
+wanted. Extended the single existing `st.markdown(<style>)` block in `app.py` (previously just the
+card padding/shadow rule) with: a system-font stack (`-apple-system`/`Segoe UI`/etc - crisper, no
+network fetch, unlike a Google Fonts import which would break offline use), heavier/tighter heading
+weight, larger card border-radius, and a rounded-corners-plus-hover-lift rule for every button
+app-wide. Also restyled the sidebar page picker (a plain `st.radio` under the hood) to read as a real
+nav list - a highlighted pill for the active page and a hover tint on the rest, using `:has(input:
+checked)` (safe in current browsers) rather than fragile emotion-hashed class names, which Streamlit
+regenerates per version/build and can't be relied on directly.
+
+Added Material Symbols icons (Streamlit's built-in `:material/name:` shorthand, no new dependency)
+throughout: one per sidebar nav item via `format_func` on the `st.radio` (kept the underlying `page`
+value a plain string, e.g. "Dashboard", so none of the many `elif page == "...":` routing checks
+needed touching), one per page's `st.header`, and one on the top-level `st.title`. Found along the
+way that `icon=` is not a valid kwarg on `st.title`/`st.header` in the installed Streamlit version
+(1.50) despite that being a common assumption - the shorthand has to be embedded directly in the
+body string instead (e.g. `st.header(":material/space_dashboard: Dashboard")`); fixed after hitting
+a live `TypeError` and confirming the correct pattern via `inspect.signature`.
+
+Verified live in the browser (screenshots, light mode + Playwright's dark `color_scheme` emulation,
+`console --errors` checked on both): sidebar nav shows icons and a green highlight pill on the active
+page, page headers show matching icons, cards have visibly softer rounded corners, and Personal
+Budget's "Save Money In" button (checked as a representative example) picks up the new rounded/hover
+style. Not yet committed - Jonathan asked to see it working before deciding whether to keep it.
+
+### 2026-08-01 (continued) — Forest green palette, replacing the grey sidebar
+Jonathan liked the polish pass but called out the leftover Streamlit-default grey (mainly the light
+grey sidebar panel) as still looking dull, and asked for a darker forest green worked in - but was
+explicit it shouldn't clash with the bright teal-green (`primaryColor` `#1D9E75`) already used
+everywhere for data (chart lines, positive KPI deltas, category pie slices). Resolved this by treating
+forest green as a separate *chrome* color, reserved for structure/navigation, and leaving every
+existing data use of the bright teal untouched - the two greens now read as distinct rather than
+competing for the same meaning.
+
+Added a `:root` palette (`--forest-deep` #14251c, `--forest-mid` #2d6a4f, `--forest-soft` #e7efe9) to
+the CSS block and: recoloured the sidebar background to `--forest-deep` (replacing Streamlit's default
+light grey panel) with `[data-testid="stSidebar"] * { color: var(--forest-soft) !important; }` for
+contrast: switched the nav's active-page pill (added earlier this session) from a teal tint to a solid
+`--forest-mid` fill; gave cards a subtle forest-tinted border (previously shadow-only); and retinted
+the button hover shadow from plain black/grey to a soft forest green. The sidebar is deliberately a
+fixed dark green regardless of the light/dark/system toggle - same pattern as a permanent dark nav
+rail in VS Code/Slack/Notion - since config.toml has never set background colors (only `primaryColor`)
+so the toggle was only ever governing the main content area anyway; nothing about the toggle itself
+changed.
+
+Verified live via Playwright screenshots (full sidebar crop + two content pages, light mode and dark
+`color_scheme` emulation, `console --errors` on all): sidebar text, icons, radio circles, chat input,
+and the collapse-arrow icon are all legible against the dark green background; the active-page pill
+is visibly a different, darker shade from the bright teal used in the Dashboard's pie chart and KPI
+deltas right next to it. Not yet committed - same as the CSS/icon pass above, held for Jonathan's
+review first.
+
+### 2026-08-01 (continued) — Lighter forest shade + tinted main background
+Two follow-up tweaks after seeing the forest palette live: Jonathan wanted a slightly lighter green
+(the first pass's `--forest-deep` #14251c read almost black), and asked for the main page's stark
+white background to be replaced with something that ties into the dark green rather than sitting
+against it as plain white. Lightened `--forest-deep` to #1b3a2b and `--forest-mid` (the active nav
+pill) to #3a7a5a - both still clearly distinct from the bright teal `primaryColor` used for data.
+Added `--forest-page-bg` (#f2f7f4, a faint sage tint) applied to `.stApp` in light mode only (same
+`@media (prefers-color-scheme: light)` pattern already used elsewhere, so dark mode - not "stark" in
+the same way - is untouched). Also caught and fixed a visual seam this introduced: Streamlit's own
+top toolbar strip (`[data-testid="stHeader"]`, the bar holding the Deploy/menu controls) has its own
+separate white background and stayed stark white against the newly tinted body below it - tinted it
+to match `--forest-page-bg` too. Cards keep their existing white-ish fill, so they still visibly pop
+above the new tinted page background rather than blending into it. Verified live via screenshots
+(Dashboard + Personal Budget, no console errors) - sidebar, header strip, and page background now
+read as one cohesive palette. Not yet committed.
+
 ---
 
 ## Maintenance convention

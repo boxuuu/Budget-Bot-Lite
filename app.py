@@ -7,7 +7,7 @@ from categoriser import categorise_all, recategorise_all
 from database import get_db, Transaction
 
 st.set_page_config(page_title="Budget Bot", layout="wide")
-st.title("Budget Bot")
+st.title(":material/savings: Budget Bot")
 
 # Shared styling: every card container uses key="card_<page>_<section>" so
 # this one rule can style them all at once, without touching background/text
@@ -18,19 +18,111 @@ st.title("Budget Bot")
 st.markdown(
     """
     <style>
+    /* Forest green palette - deliberately darker/more muted than the bright
+       teal-green (#1D9E75, primaryColor) already used everywhere for DATA
+       (chart lines, positive deltas, KPI arrows) - kept as a separate chrome
+       color for structure/navigation so the two greens read as distinct,
+       not a clash. */
+    :root {
+        --forest-deep: #1b3a2b;
+        --forest-mid: #3a7a5a;
+        --forest-soft: #e7efe9;
+        --forest-page-bg: #f2f7f4;
+    }
+
+    /* Typography: swap Streamlit's default for a native system stack -
+       crisper on macOS, and every fallback here is already installed on
+       Windows/Linux too, so nothing needs to be loaded over the network. */
+    .stApp {
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    /* Main page background: a faint sage tint instead of stark white, so it
+       reads as part of the same forest-green palette as the sidebar rather
+       than a plain default canvas. Light mode only - dark mode already uses
+       Streamlit's own dark background, which isn't "stark" in the same way. */
+    @media (prefers-color-scheme: light) {
+        .stApp {
+            background-color: var(--forest-page-bg);
+        }
+        [data-testid="stHeader"] {
+            background-color: var(--forest-page-bg);
+        }
+    }
+    h1, h2, h3, h4 {
+        font-weight: 650;
+        letter-spacing: -0.01em;
+    }
+
     div[class*="st-key-card_"] {
-        padding: 1rem 1.25rem;
+        padding: 1.25rem 1.5rem;
         margin-bottom: 1rem;
+        border-radius: 0.9rem;
+        border: 1px solid rgba(45, 106, 79, 0.14);
         box-shadow: 0 1px 3px rgba(0,0,0,0.08);
     }
     @media (prefers-color-scheme: dark) {
         div[class*="st-key-card_"] {
+            border-color: rgba(45, 106, 79, 0.3);
             box-shadow: 0 1px 3px rgba(0,0,0,0.4);
         }
     }
     .st-key-nw_asset_metric [data-testid="stMetricValue"],
     .st-key-nw_total_metric [data-testid="stMetricValue"] {
         font-size: 3rem;
+    }
+
+    /* Buttons: rounded corners + a small hover lift instead of Streamlit's
+       flat default, applied everywhere (Personal/Household Budget grids,
+       Recurring Charges actions, Net Worth asset rows, etc.) - hover shadow
+       tinted forest green rather than plain grey/black. */
+    .stButton > button, .stDownloadButton > button {
+        border-radius: 0.6rem;
+        transition: transform 0.1s ease, box-shadow 0.15s ease;
+    }
+    .stButton > button:hover, .stDownloadButton > button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(45, 106, 79, 0.25);
+    }
+
+    /* Sidebar: dark forest-green chrome instead of Streamlit's default flat
+       grey panel - fixed regardless of the light/dark/system toggle (which
+       only ever affects the main content area; config.toml sets no
+       background colors), the same way a permanent dark nav rail works in
+       most real apps (VS Code, Slack, Notion). Text/icons forced to a soft
+       off-white for contrast, since Streamlit's own sidebar text color is
+       tuned for the light grey panel, not a dark one. */
+    [data-testid="stSidebar"] {
+        background-color: var(--forest-deep);
+    }
+    [data-testid="stSidebar"] * {
+        color: var(--forest-soft) !important;
+    }
+    [data-testid="stSidebar"] hr {
+        border-color: rgba(231, 239, 233, 0.15);
+    }
+    [data-testid="stSidebar"] [data-baseweb="textarea"],
+    [data-testid="stSidebar"] [data-baseweb="base-input"] {
+        background-color: rgba(231, 239, 233, 0.07);
+    }
+
+    /* Sidebar nav: the page picker is a plain st.radio under the hood, so
+       style it to read as a real nav list - a solid forest-green pill for
+       the active page (:has(input:checked), safe in all current browsers)
+       and a subtle light hover tint on the rest. */
+    [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"] {
+        border-radius: 0.6rem;
+        padding: 0.4rem 0.6rem;
+        margin-bottom: 0.15rem;
+        transition: background-color 0.15s ease;
+    }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:hover {
+        background-color: rgba(231, 239, 233, 0.08);
+    }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) {
+        background-color: var(--forest-mid);
+    }
+    [data-testid="stSidebar"] [data-testid="stRadio"] label[data-baseweb="radio"]:has(input:checked) p {
+        font-weight: 600;
     }
     </style>
     """,
@@ -169,7 +261,23 @@ def parse_santander_transactions(lines):
 
 # --- Sidebar ---
 st.sidebar.title("Navigation")
-page = st.sidebar.radio("Go to", ["Dashboard", "Net Worth", "Personal Budget", "Household Budget", "Upload Statement", "View Transactions", "Manage Categories"])
+
+PAGE_ICONS = {
+    "Dashboard": "space_dashboard",
+    "Net Worth": "trending_up",
+    "Personal Budget": "account_balance_wallet",
+    "Household Budget": "home",
+    "Upload Statement": "upload_file",
+    "View Transactions": "receipt_long",
+    "Manage Categories": "sell",
+}
+# format_func only changes the displayed label (icon + name) - the returned
+# `page` value stays a plain page name, so every `elif page == "...":` check
+# below is untouched.
+page = st.sidebar.radio(
+    "Go to", list(PAGE_ICONS.keys()),
+    format_func=lambda p: f":material/{PAGE_ICONS[p]}: {p}"
+)
 
 st.sidebar.divider()
 
@@ -246,7 +354,7 @@ with st.sidebar:
 
 # --- Dashboard Page ---
 if page == "Dashboard":
-    st.header("Dashboard")
+    st.header(":material/space_dashboard: Dashboard")
 
     all_transactions = load_all_transactions()
 
@@ -490,7 +598,7 @@ if page == "Dashboard":
 
 # --- Upload Statement Page ---
 elif page == "Upload Statement":
-    st.header("Upload Statement")
+    st.header(":material/upload_file: Upload Statement")
 
     from household_transactions import save_household_transactions
 
@@ -586,7 +694,7 @@ elif page == "Upload Statement":
 
 # --- Net Worth Page ---
 elif page == "Net Worth":
-    st.header("Net Worth")
+    st.header(":material/trending_up: Net Worth")
 
     from networth import (
         get_all_asset_history, get_asset_names, import_from_worthit,
@@ -936,7 +1044,7 @@ elif page == "Net Worth":
 
 # --- Personal Budget Page ---
 elif page == "Personal Budget":
-    st.header("Personal Budget")
+    st.header(":material/account_balance_wallet: Personal Budget")
 
     from budget import (
         get_personal_items, replace_personal_section, get_personal_total_expenses,
@@ -1106,7 +1214,7 @@ elif page == "Personal Budget":
 
 # --- Household Budget Page ---
 elif page == "Household Budget":
-    st.header("Household Budget")
+    st.header(":material/home: Household Budget")
 
     from budget import (
         get_household_items, replace_household_items, get_household_total,
@@ -1270,7 +1378,7 @@ elif page == "Household Budget":
 
 # --- View Transactions Page ---
 elif page == "View Transactions":
-    st.header("All Transactions")
+    st.header(":material/receipt_long: All Transactions")
     
     all_transactions = load_all_transactions()
 
@@ -1312,7 +1420,7 @@ elif page == "View Transactions":
 
 # --- Manage Categories Page ---
 elif page == "Manage Categories":
-    st.header("Manage Categories")
+    st.header(":material/sell: Manage Categories")
     st.write("Review and correct how each merchant has been categorised.")
 
     from database import get_db, Transaction
