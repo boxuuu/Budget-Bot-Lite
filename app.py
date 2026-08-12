@@ -506,12 +506,11 @@ if page == "Dashboard":
         with col_pie, st.container(border=True, key="card_dashboard_goals"):
             st.subheader(":material/flag: Goals")
 
-            from goals import get_current_goal, calculate_streak
-            from analytics import get_monthly_spend
+            from goals import get_current_goal, calculate_streak, get_discretionary_monthly_spend
 
             current_month_label = datetime.now().strftime('%b %Y')
             savings_by_month = {m: v for m, v in calculate_savings_rate(all_transactions)['savings_by_month'].items() if m != current_month_label}
-            spend_by_month = {m: v for m, v in get_monthly_spend(all_transactions).items() if m != current_month_label}
+            spend_by_month = {m: v for m, v in get_discretionary_monthly_spend(all_transactions).items() if m != current_month_label}
 
             savings_goal = get_current_goal('savings')
             spend_goal = get_current_goal('spend')
@@ -1461,9 +1460,9 @@ elif page == "Goals":
     from datetime import datetime
     from goals import (
         get_current_goal, get_all_goals, set_goal, next_effective_month,
-        calculate_streak
+        calculate_streak, get_discretionary_monthly_spend, NON_DISCRETIONARY_CATEGORIES
     )
-    from analytics import calculate_savings_rate, get_monthly_spend, month_sort_key, format_gbp
+    from analytics import calculate_savings_rate, month_sort_key, format_gbp
 
     all_transactions = load_all_transactions()
     current_month_label = datetime.now().strftime('%b %Y')
@@ -1471,7 +1470,7 @@ elif page == "Goals":
 
     savings_rates = calculate_savings_rate(all_transactions)
     savings_by_month_all = savings_rates['savings_by_month']
-    spend_by_month_all = get_monthly_spend(all_transactions)
+    spend_by_month_all = get_discretionary_monthly_spend(all_transactions)
 
     # Complete months only - the current calendar month is still in progress,
     # so it's excluded from streak calculations (shown separately below as
@@ -1529,7 +1528,11 @@ elif page == "Goals":
                 st.dataframe(hist_df, use_container_width=True, hide_index=True)
 
     with goal_col2, st.container(border=True, key="card_goal_spend"):
-        st.subheader(":material/payments: Spend Ceiling")
+        st.subheader(":material/payments: Discretionary Spend Ceiling")
+        st.caption(
+            "Excludes fixed costs you don't really have month-to-month control over: "
+            + ", ".join(NON_DISCRETIONARY_CATEGORIES) + "."
+        )
 
         spend_goal = get_current_goal('spend')
         spend_streak = calculate_streak('spend', spend_by_month_complete)
@@ -1552,12 +1555,12 @@ elif page == "Goals":
             st.caption(f"Takes effect from **{next_month}**, not this month. Changing this resets your streak.")
             st.caption(f"Suggested, from your last 3 months' average: {format_gbp(suggested_spend)}")
             new_spend_target = st.number_input(
-                "Monthly spend ceiling (£)", min_value=0.0, step=50.0,
+                "Monthly discretionary spend ceiling (£)", min_value=0.0, step=50.0,
                 value=float(max(0, round(suggested_spend))), key="goal_input_spend"
             )
             if st.button("Save spend ceiling", key="goal_save_spend"):
                 set_goal('spend', new_spend_target, next_month)
-                st.success(f"Spend ceiling of {format_gbp(new_spend_target)} set for {next_month}")
+                st.success(f"Discretionary spend ceiling of {format_gbp(new_spend_target)} set for {next_month}")
                 st.rerun()
 
         spend_history = get_all_goals('spend')

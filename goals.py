@@ -24,6 +24,27 @@ class Goal(Base):
     effective_month = Column(String)
     created_at = Column(DateTime)
 
+# Categories treated as fixed, non-negotiable costs and excluded from the
+# spend-ceiling goal specifically - deliberately narrower than
+# analytics.get_monthly_spend (used by the Dashboard's KPI/trend chart),
+# which stays gross/unmodified by design since it's meant to show true
+# total spend. Confirmed with Jonathan 2026-08-12: the spend goal should
+# reflect discretionary spending he actually has control over month to
+# month, not fixed bills he can't meaningfully flex.
+NON_DISCRETIONARY_CATEGORIES = ['Rent & Housing', 'Bills & Utilities', 'Insurance & Finance', 'Phone & Internet']
+
+def get_discretionary_monthly_spend(transactions):
+    """{month: total_spend} - same gross-outflow-excluding-Savings&Investments
+    definition as analytics.get_monthly_spend, but also excludes
+    NON_DISCRETIONARY_CATEGORIES. Used only by the Goals page's spend
+    ceiling and its Dashboard tile."""
+    from collections import defaultdict
+    by_month = defaultdict(float)
+    for t in transactions:
+        if t.amount < 0 and t.category != 'Savings & Investments' and t.category not in NON_DISCRETIONARY_CATEGORIES:
+            by_month[t.month] += abs(t.amount)
+    return dict(by_month)
+
 def get_goals_db():
     engine = create_engine('sqlite:///budget_bot.db')
     Base.metadata.create_all(engine)

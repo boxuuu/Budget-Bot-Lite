@@ -666,6 +666,33 @@ correctly, saved a real test goal (target correctly showed "Starts Sep 2026", st
 table recorded it), confirmed the Dashboard tile picked it up, then deleted the test goal directly so
 Jonathan's real database was left exactly as it was before (no goals set). Not yet committed.
 
+### 2026-08-12 (continued) — Spend Ceiling scoped to discretionary spending only
+Jonathan noticed the Spend Ceiling was using the same gross-spend definition as the Dashboard's "Total
+Spent" (everything except Savings & Investments) - meaning Rent & Housing, Bills & Utilities, etc. all
+counted toward it, which isn't spending he actually has month-to-month control over. Asked for the
+goal specifically to reflect discretionary spending instead. Presented three exclusion-set options;
+Jonathan picked excluding Rent & Housing, Bills & Utilities, Insurance & Finance, and Phone & Internet.
+
+Added `goals.NON_DISCRETIONARY_CATEGORIES` and `goals.get_discretionary_monthly_spend()` - same gross-
+outflow-excluding-Savings&Investments definition as `analytics.get_monthly_spend`, plus the four
+excluded categories. Deliberately kept as a Goals-only helper rather than changing the shared
+`analytics.get_monthly_spend`/`calculate_avg_monthly_spend`, which the Dashboard's KPI and trend chart
+still use unmodified by design (same reasoning as the existing Savings & Investments netting scope
+note in Known Issues - a goal-specific definition shouldn't leak into general spending views). Swapped
+both of the Spend Ceiling's call sites (the Goals page and the Dashboard tile) to the new function;
+relabelled the card "Discretionary Spend Ceiling" with a caption listing the excluded categories, and
+the input/success-message copy to match.
+
+While verifying this live, found the database already had a real Savings Goal (£835) and Spend Ceiling
+(£250) saved, both effective Sep 2026 - initially concerning, since I'd verified the goals table was
+empty at the end of the previous session. Asked Jonathan directly rather than assuming and deleting:
+confirmed he'd set both himself while exploring the page (explains his Rent & Housing question - he
+was looking at the real feature with real numbers). Left both untouched - the discretionary-spend
+change applies automatically going forward without needing to touch the stored target values
+themselves. Verified live: Goals page shows the new "Discretionary Spend Ceiling" title and exclusion
+caption correctly against his real £250 target; Dashboard tile shows both streaks at 0 months (neither
+goal's effective month has arrived yet). Not yet committed.
+
 ---
 
 ## Maintenance convention
