@@ -693,6 +693,22 @@ themselves. Verified live: Goals page shows the new "Discretionary Spend Ceiling
 caption correctly against his real £250 target; Dashboard tile shows both streaks at 0 months (neither
 goal's effective month has arrived yet). Not yet committed.
 
+### 2026-08-12 (continued) — Fixed Dashboard "Monthly Average" KPI (all-time total ÷ hardcoded 6)
+Jonathan flagged the Dashboard's Monthly Average KPI as impossible - it read £12,991.18. Root cause:
+despite being labelled "Total Spent (6 months)", `spending['Amount'].sum()` was never actually filtered
+to any date range - it summed EVERY transaction ever uploaded (12 months of real data, £77,947.08
+total), and "Monthly Average" then divided that all-time total by a hardcoded `6` regardless of how
+much data actually existed. Confirmed the exact arithmetic matched the bug (£77,947.08 / 6 =
+£12,991.18) before fixing.
+
+Fixed by actually filtering to the trailing 6 months (`DateParsed >= now - 182 days`, the same cutoff
+already used by the page's own "6 Months" time-filter buttons) for both KPIs, and dividing by the
+REAL number of distinct months present in that window rather than a fixed 6 - so the figure stays
+correct even with less than 6 months of data, rather than swapping one hardcoded-divisor bug for
+another. Verified live: Total Spent (6 months) now reads £51,595.64 (genuinely Feb-Jul 2026) and
+Monthly Average reads £8,599.27 - both independently cross-checked against a direct pandas calculation
+before trusting the UI number. Not yet committed.
+
 ---
 
 ## Maintenance convention

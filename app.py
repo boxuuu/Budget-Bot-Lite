@@ -428,11 +428,25 @@ if page == "Dashboard":
                 else:
                     st.metric("Net Worth", "No data yet")
 
+            # Both KPIs below are genuinely scoped to the trailing 6 months
+            # (by DateParsed, same 182-day cutoff as the "6 Months" filter
+            # elsewhere on this page) - previously "Total Spent (6 months)"
+            # actually summed ALL-time spending regardless of the label, and
+            # "Monthly Average" divided that all-time total by a hardcoded 6,
+            # wildly inflating the figure once more than 6 months of data
+            # existed. Divides by the ACTUAL number of distinct months
+            # present in the window, not a fixed 6, so it stays correct even
+            # with less than 6 months of data.
+            six_months_cutoff = now - timedelta(days=182)
+            recent_spending = spending[spending['DateParsed'] >= six_months_cutoff]
+            recent_months_count = recent_spending['Month'].nunique()
+
             with col2:
-                st.metric("Total Spent (6 months)", f"£{spending['Amount'].sum():,.2f}")
+                st.metric("Total Spent (6 months)", f"£{recent_spending['Amount'].sum():,.2f}")
 
             with col3:
-                st.metric("Monthly Average", f"£{spending['Amount'].sum() / 6:,.2f}")
+                monthly_avg = recent_spending['Amount'].sum() / recent_months_count if recent_months_count else 0
+                st.metric("Monthly Average", f"£{monthly_avg:,.2f}")
 
             with col4:
                 savings_info = calculate_savings_rate(all_transactions)
