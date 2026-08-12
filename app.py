@@ -445,8 +445,24 @@ if page == "Dashboard":
                 st.metric("Total Spent (6 months)", f"£{recent_spending['Amount'].sum():,.2f}")
 
             with col3:
-                monthly_avg = recent_spending['Amount'].sum() / recent_months_count if recent_months_count else 0
-                st.metric("Monthly Average", f"£{monthly_avg:,.2f}")
+                # Discretionary only, same definition as the Goals page's
+                # Spend Ceiling (goals.NON_DISCRETIONARY_CATEGORIES) -
+                # excludes Savings & Investments (pot transfers, not
+                # spending) and fixed costs (Rent & Housing, Bills &
+                # Utilities, Insurance & Finance, Phone & Internet), so a
+                # big one-off house-move charge or a savings push doesn't
+                # dominate the figure. "Total Spent" above stays gross/
+                # unmodified by design (per Known Issues) - this KPI is
+                # deliberately the more "actionable" number instead.
+                from goals import NON_DISCRETIONARY_CATEGORIES
+                excluded_categories = ['Savings & Investments'] + NON_DISCRETIONARY_CATEGORIES
+                discretionary_spending = recent_spending[~recent_spending['Category'].isin(excluded_categories)]
+                monthly_avg = discretionary_spending['Amount'].sum() / recent_months_count if recent_months_count else 0
+                st.metric(
+                    "Monthly Average", f"£{monthly_avg:,.2f}",
+                    help="Discretionary spend only - excludes Savings & Investments and fixed costs "
+                         "(Rent & Housing, Bills & Utilities, Insurance & Finance, Phone & Internet)."
+                )
 
             with col4:
                 savings_info = calculate_savings_rate(all_transactions)

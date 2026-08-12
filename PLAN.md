@@ -709,6 +709,28 @@ another. Verified live: Total Spent (6 months) now reads £51,595.64 (genuinely 
 Monthly Average reads £8,599.27 - both independently cross-checked against a direct pandas calculation
 before trusting the UI number. Not yet committed.
 
+### 2026-08-12 (continued) — Monthly Average KPI scoped to discretionary spend too
+Even after the hardcoded-divisor fix above, Jonathan flagged the corrected £8,599.27 Monthly Average
+as still implausibly high and asked what was actually driving it - suspecting inter-account transfers
+and recent house-move costs. Broke down the real trailing-6-month data to check: confirmed both
+guesses. Savings & Investments transfers (Emergency Fund, Fun Money, Wedding, AJ Bell contributions)
+alone were £24,662.30 of the £51,595.64 total (48%) - money moving to his own pots, not spending - and
+Rent & Housing included a real one-off £954 "Stockport Removals & Storage LTD" charge from the house
+move alongside recurring ~£1,000-1,150/month "HOUSE ACC" transfers. This wasn't the hardcoded-6 bug -
+it's the Dashboard's existing, deliberate "Total Spent stays gross/unmodified" design (Known Issues) -
+but Jonathan agreed the Monthly Average KPI specifically would be more useful scoped to discretionary
+spend, same definition as the Goals page's Spend Ceiling.
+
+Changed Monthly Average to exclude Savings & Investments plus `goals.NON_DISCRETIONARY_CATEGORIES`
+(Rent & Housing, Bills & Utilities, Insurance & Finance, Phone & Internet) - reused the same constant
+rather than duplicating the list, so the two features can't drift apart. "Total Spent (6 months)"
+deliberately left as-is (gross) - Jonathan was only asked about, and only agreed to, changing Monthly
+Average; Total Spent stays the "complete picture" figure per the existing design principle. Added a
+help tooltip on the KPI explaining what's excluded, since the number no longer means "everything you
+spent." Verified live: Monthly Average now reads £2,469.88 (cross-checked against a direct pandas
+calculation first) - a much more plausible discretionary figure than either the buggy £12,991.18 or
+the corrected-but-still-gross £8,599.27. Not yet committed.
+
 ---
 
 ## Maintenance convention
