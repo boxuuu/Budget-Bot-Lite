@@ -267,6 +267,7 @@ PAGE_ICONS = {
     "Net Worth": "trending_up",
     "Personal Budget": "account_balance_wallet",
     "Household Budget": "home",
+    "Goals": "flag",
     "Upload Statement": "upload_file",
     "View Transactions": "receipt_long",
     "Manage Categories": "sell",
@@ -502,6 +503,36 @@ if page == "Dashboard":
                 )
                 st.plotly_chart(fig_pie, use_container_width=True)
 
+        with col_pie, st.container(border=True, key="card_dashboard_goals"):
+            st.subheader(":material/flag: Goals")
+
+            from goals import get_current_goal, calculate_streak
+            from analytics import get_monthly_spend
+
+            current_month_label = datetime.now().strftime('%b %Y')
+            savings_by_month = {m: v for m, v in calculate_savings_rate(all_transactions)['savings_by_month'].items() if m != current_month_label}
+            spend_by_month = {m: v for m, v in get_monthly_spend(all_transactions).items() if m != current_month_label}
+
+            savings_goal = get_current_goal('savings')
+            spend_goal = get_current_goal('spend')
+
+            if not savings_goal and not spend_goal:
+                st.caption("No goals set yet - visit the Goals page to set a savings target or spend ceiling.")
+            else:
+                streak_col1, streak_col2 = st.columns(2)
+                with streak_col1:
+                    st.caption("Savings streak")
+                    if savings_goal:
+                        st.markdown(f":material/local_fire_department: **{calculate_streak('savings', savings_by_month)} months**")
+                    else:
+                        st.write("Not set")
+                with streak_col2:
+                    st.caption("Spend streak")
+                    if spend_goal:
+                        st.markdown(f":material/local_fire_department: **{calculate_streak('spend', spend_by_month)} months**")
+                    else:
+                        st.write("Not set")
+
         with col_merchants, st.container(border=True, key="card_dashboard_merchants"):
             st.subheader("Top Merchants")
             merchants_cutoff = render_time_filter("dashboard_merchants")
@@ -699,7 +730,7 @@ elif page == "Net Worth":
     from networth import (
         get_all_asset_history, get_asset_names, import_from_worthit,
         update_asset_value, delete_asset,
-        get_total_net_worth_series, project_net_worth
+        get_total_net_worth_series, get_per_asset_series, project_net_worth
     )
     import plotly.express as px
     import plotly.graph_objects as go
@@ -897,17 +928,58 @@ elif page == "Net Worth":
 
             st.subheader("Total Assets Over Time")
 
+            show_per_asset = st.checkbox("Show per-asset breakdown", key="nw_show_per_asset")
+
             fig_total = px.line(
                 daily_total, x='Date', y='Total',
                 labels={'Total': 'Total Assets (£)', 'Date': ''},
             )
-            fig_total.update_traces(line_color='#1D9E75', line_width=2)
+            fig_total.update_traces(line_color='#1D9E75', line_width=2, name='Total', showlegend=show_per_asset)
+
+            if show_per_asset:
+                # Same forward-filled daily pivot the Total line is summed
+                # from, just not summed - one column per asset. Filtered by
+                # the same time-range cutoff as daily_total above, for
+                # consistency with the rest of this chart.
+                full_per_asset = get_per_asset_series()
+                per_asset = (
+                    full_per_asset[full_per_asset['Date'] >= cutoff.date()]
+                    if cutoff else full_per_asset
+                )
+                asset_columns = [c for c in per_asset.columns if c != 'Date']
+
+                # Validated categorical palette (fixed hue order, same one
+                # used by the Dashboard's category pie chart) - colors follow
+                # the asset's name alphabetically, not its current rank, so a
+                # given asset keeps the same color across every time filter.
+                # More than 8 assets folds the smallest into "Other" (muted
+                # gray) rather than generating a 9th hue.
+                palette = ['#2a78d6', '#008300', '#e87ba4', '#eda100', '#1baf7a', '#eb6834', '#4a3aa7', '#e34948']
+                if len(asset_columns) > len(palette):
+                    latest = per_asset[asset_columns].iloc[-1].sort_values(ascending=False)
+                    top_assets = sorted(latest.index[:len(palette)].tolist())
+                    other_assets = [a for a in asset_columns if a not in top_assets]
+                    per_asset = per_asset.copy()
+                    per_asset['Other'] = per_asset[other_assets].sum(axis=1)
+                    asset_columns = top_assets + ['Other']
+
+                color_map = {name: palette[i] for i, name in enumerate(sorted(a for a in asset_columns if a != 'Other'))}
+                color_map['Other'] = '#898781'
+
+                for name in asset_columns:
+                    fig_total.add_trace(go.Scatter(
+                        x=per_asset['Date'], y=per_asset[name],
+                        mode='lines', name=name,
+                        line=dict(color=color_map[name], width=1.5),
+                    ))
+
             fig_total.update_layout(
                 yaxis_tickprefix='£',
                 yaxis_tickformat=',.0f',
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
-                margin=dict(l=0, r=0, t=0, b=0)
+                margin=dict(l=0, r=0, t=0, b=0),
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1, title=None)
             )
 
             st.plotly_chart(fig_total, use_container_width=True)
@@ -1375,6 +1447,128 @@ elif page == "Household Budget":
                         if rcol[4].button("Un-dismiss", key=f"hh_undismiss_{r['merchant']}"):
                             undismiss_household_recurring_charge(r['merchant'])
                             st.rerun()
+
+# --- Goals Page ---
+elif page == "Goals":
+    st.header(":material/flag: Goals")
+    st.caption(
+        "Set a savings target and a spending ceiling for yourself. A new target always starts "
+        "next month, never the one you're currently in - so there's no way to loosen a target "
+        "you're about to miss. Changing a target also resets its streak back to zero, even if "
+        "it's a change that only takes effect next month."
+    )
+
+    from datetime import datetime
+    from goals import (
+        get_current_goal, get_all_goals, set_goal, next_effective_month,
+        calculate_streak
+    )
+    from analytics import calculate_savings_rate, get_monthly_spend, month_sort_key, format_gbp
+
+    all_transactions = load_all_transactions()
+    current_month_label = datetime.now().strftime('%b %Y')
+    next_month = next_effective_month()
+
+    savings_rates = calculate_savings_rate(all_transactions)
+    savings_by_month_all = savings_rates['savings_by_month']
+    spend_by_month_all = get_monthly_spend(all_transactions)
+
+    # Complete months only - the current calendar month is still in progress,
+    # so it's excluded from streak calculations (shown separately below as
+    # "so far this month" instead, which doesn't count toward the streak).
+    savings_by_month_complete = {m: v for m, v in savings_by_month_all.items() if m != current_month_label}
+    spend_by_month_complete = {m: v for m, v in spend_by_month_all.items() if m != current_month_label}
+
+    def last_n_avg(monthly_dict, n=3):
+        recent_months = sorted(monthly_dict.keys(), key=month_sort_key, reverse=True)[:n]
+        values = [monthly_dict[m] for m in recent_months]
+        return sum(values) / len(values) if values else 0
+
+    goal_col1, goal_col2 = st.columns(2)
+
+    with goal_col1, st.container(border=True, key="card_goal_savings"):
+        st.subheader(":material/savings: Savings Goal")
+
+        savings_goal = get_current_goal('savings')
+        savings_streak = calculate_streak('savings', savings_by_month_complete)
+        savings_active_now = savings_goal is not None and month_sort_key(savings_goal.effective_month) <= month_sort_key(current_month_label)
+
+        if savings_goal:
+            status = "Active now" if savings_active_now else f"Starts {savings_goal.effective_month}"
+            st.metric(f"Target ({status})", format_gbp(savings_goal.target_amount))
+        else:
+            st.write("No savings target set yet.")
+
+        st.markdown(f":material/local_fire_department: **{savings_streak}-month streak**")
+
+        if savings_active_now:
+            so_far = savings_by_month_all.get(current_month_label, 0)
+            st.caption(f"So far this month: {format_gbp(so_far)} (target: {format_gbp(savings_goal.target_amount)} or more)")
+
+        with st.expander("Set a new target"):
+            suggested_savings = last_n_avg(savings_by_month_complete)
+            st.caption(f"Takes effect from **{next_month}**, not this month. Changing this resets your streak.")
+            st.caption(f"Suggested, from your last 3 months' average: {format_gbp(suggested_savings)}")
+            new_savings_target = st.number_input(
+                "Monthly savings target (£)", min_value=0.0, step=50.0,
+                value=float(max(0, round(suggested_savings))), key="goal_input_savings"
+            )
+            if st.button("Save savings target", key="goal_save_savings"):
+                set_goal('savings', new_savings_target, next_month)
+                st.success(f"Savings target of {format_gbp(new_savings_target)} set for {next_month}")
+                st.rerun()
+
+        savings_history = get_all_goals('savings')
+        if savings_history:
+            with st.expander("History"):
+                hist_df = pd.DataFrame([{
+                    'Effective': g.effective_month,
+                    'Target': format_gbp(g.target_amount),
+                    'Set on': g.created_at.strftime('%d %b %Y')
+                } for g in reversed(savings_history)])
+                st.dataframe(hist_df, use_container_width=True, hide_index=True)
+
+    with goal_col2, st.container(border=True, key="card_goal_spend"):
+        st.subheader(":material/payments: Spend Ceiling")
+
+        spend_goal = get_current_goal('spend')
+        spend_streak = calculate_streak('spend', spend_by_month_complete)
+        spend_active_now = spend_goal is not None and month_sort_key(spend_goal.effective_month) <= month_sort_key(current_month_label)
+
+        if spend_goal:
+            status = "Active now" if spend_active_now else f"Starts {spend_goal.effective_month}"
+            st.metric(f"Target ({status})", format_gbp(spend_goal.target_amount))
+        else:
+            st.write("No spend ceiling set yet.")
+
+        st.markdown(f":material/local_fire_department: **{spend_streak}-month streak**")
+
+        if spend_active_now:
+            so_far = spend_by_month_all.get(current_month_label, 0)
+            st.caption(f"So far this month: {format_gbp(so_far)} (target: {format_gbp(spend_goal.target_amount)} or under)")
+
+        with st.expander("Set a new target"):
+            suggested_spend = last_n_avg(spend_by_month_complete)
+            st.caption(f"Takes effect from **{next_month}**, not this month. Changing this resets your streak.")
+            st.caption(f"Suggested, from your last 3 months' average: {format_gbp(suggested_spend)}")
+            new_spend_target = st.number_input(
+                "Monthly spend ceiling (£)", min_value=0.0, step=50.0,
+                value=float(max(0, round(suggested_spend))), key="goal_input_spend"
+            )
+            if st.button("Save spend ceiling", key="goal_save_spend"):
+                set_goal('spend', new_spend_target, next_month)
+                st.success(f"Spend ceiling of {format_gbp(new_spend_target)} set for {next_month}")
+                st.rerun()
+
+        spend_history = get_all_goals('spend')
+        if spend_history:
+            with st.expander("History"):
+                hist_df = pd.DataFrame([{
+                    'Effective': g.effective_month,
+                    'Target': format_gbp(g.target_amount),
+                    'Set on': g.created_at.strftime('%d %b %Y')
+                } for g in reversed(spend_history)])
+                st.dataframe(hist_df, use_container_width=True, hide_index=True)
 
 # --- View Transactions Page ---
 elif page == "View Transactions":

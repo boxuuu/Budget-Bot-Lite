@@ -591,6 +591,81 @@ above the new tinted page background rather than blending into it. Verified live
 (Dashboard + Personal Budget, no console errors) - sidebar, header strip, and page background now
 read as one cohesive palette. Not yet committed.
 
+### 2026-08-01 (continued) — Per-asset breakdown toggle on Total Assets Over Time
+Jonathan asked how hard it'd be to add a line per asset to "Total Assets Over Time." Flagged the
+real tradeoff up front: assets span very different scales (pensions in the hundreds of thousands vs a
+much smaller Emergency Fund), so all lines sharing one linear axis risks squashing the small ones -
+the same problem just fixed for the actual/projected split earlier this session. Presented three
+options (separate chart, same chart, same chart behind a toggle); Jonathan picked toggle - keep the
+clean Total-only view by default, opt into the breakdown.
+
+Refactored `networth.py`: pulled the pivot logic already inside `get_total_net_worth_series` (one
+column per asset, forward-filled daily, before summing to Total) out into a shared `_daily_asset_pivot`
+helper, and added `get_per_asset_series()` which returns that same pivot *without* summing it - one
+column per asset. `get_total_net_worth_series` now calls the shared helper too, so both functions stay
+in sync with zero duplicated pivot logic. Added a "Show per-asset breakdown" checkbox to the Net Worth
+page (off by default) - when checked, one line per asset is added to the existing chart via
+`go.Scatter` traces, respecting the same time-range filter and cutoff as the Total line, colored with
+the same validated 8-slot categorical palette already used by the Dashboard's category pie chart
+(colors assigned alphabetically by asset name, not by current value, so a given asset keeps its color
+across every time filter - per the dataviz skill's "color follows the entity, not its rank" rule).
+More than 8 assets would fold the smallest into a muted-gray "Other" line rather than generating a 9th
+hue, though this hasn't been exercised yet (6 assets currently tracked). Loaded the dataviz skill
+before implementing to reuse its validated palette rather than picking colors ad hoc.
+
+Verified live in the browser: toggle off looks identical to before (Total line only, no legend, no
+console errors); toggle on shows all 6 assets + Total with a horizontal legend, confirms the expected
+scale tradeoff in practice (Private Pension and Total are clearly readable; Emergency Fund/Barclays
+Shares/Coinbase/ISA/Workplace Pension compress into a thin band near £0 since they're much smaller) -
+acceptable since it's opt-in and doesn't affect the default view. Not yet committed.
+
+### 2026-08-12 — Goals page: savings/spend targets with streaks
+Jonathan wanted to gamify saving more/spending less. A plain "did you save more than last month"
+streak wouldn't work well since his spending is already fairly regular month to month, so we landed
+on an explicit goals/targets design instead, with two open questions he asked for options on: how to
+stop himself loosening a target he's about to miss, and how targets get set. Resolved: (1) a new goal
+always takes effect from next month, never the one in progress, AND changing a goal immediately
+zeroes its streak (even for a same-month future change) - a real cost to moving the goalposts, not
+just a delay; (2) targets pre-fill with a suggested figure from the last 3 complete months' real
+average, editable before saving; (3) scoped to two goal types only for v1 - an overall savings target
+and an overall spend ceiling, deliberately not per-category, echoing the granularity/upkeep tradeoff
+already parked once on Stage 8.
+
+Built a new `goals.py` module, `Goal` model: append-only like `AssetValue` (editing never overwrites
+the current row, just inserts a new one with a future `effective_month`), so past months keep being
+judged by whatever target actually governed them at the time - history never changes retroactively.
+`calculate_streak()` walks backward from the most recent complete month counting consecutive hits,
+stopping at the first miss OR the first month that predates the CURRENT (most recently set) goal row -
+that second condition is what makes an edit "reset" the streak, since a fresh edit's effective_month
+is always next month, so zero complete months fall under it yet. Verified this logic directly
+(bypassing the UI) with synthetic goal rows before trusting it: 3 consecutive hits ending on the most
+recent month streaks correctly; a miss in the most recent month (even after prior hits) correctly
+zeroes the streak, matching real "current streak" semantics (a break today zeroes it, regardless of a
+past run); editing a goal correctly zeroes it even when a later month would otherwise have hit the new
+target. All synthetic rows cleaned up afterward.
+
+Added `analytics.get_monthly_spend()` (extracted from the existing `calculate_avg_monthly_spend`,
+which now calls it) since the Goals page needed a per-month breakdown, not just one overall average,
+for both the spend streak and the suggested-target calculation. Built the Goals page (new sidebar nav
+entry, `flag` icon) with a Savings Goal and Spend Ceiling card - each showing the current target and
+whether it's active yet or starts next month, the streak (`local_fire_department` icon), this month's
+progress so far (informational only, doesn't count toward the streak until the month is complete), a
+"Set a new target" expander with the suggested default, and a History expander. Added a compact
+"Goals" tile to the Dashboard under the Spending by Category pie chart, in the space Jonathan pointed
+out was free next to the taller Top Merchants card - shows both streaks at a glance, or a prompt to
+visit the Goals page if neither is set yet.
+
+Scoped to personal transactions only (`load_all_transactions`), matching every other savings-rate/
+spend feature in the app (Household stays fully separate, per CLAUDE.md, and wasn't asked for here).
+
+Hit and fixed one real bug during live testing: `st.number_input`'s pre-filled `value` used
+`max(0.0, round(suggested))`, but `round()` on a float returns an int, and `max()` returning that int
+tripped Streamlit's `StreamlitMixedNumericTypesError` (value/min_value/step must share a type) -
+wrapped in `float()`. Verified the full flow live in the browser: suggested default populated
+correctly, saved a real test goal (target correctly showed "Starts Sep 2026", streak stayed 0, History
+table recorded it), confirmed the Dashboard tile picked it up, then deleted the test goal directly so
+Jonathan's real database was left exactly as it was before (no goals set). Not yet committed.
+
 ---
 
 ## Maintenance convention

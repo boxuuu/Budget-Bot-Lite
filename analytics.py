@@ -118,16 +118,26 @@ def calculate_savings_rate(transactions):
         'savings_rate': savings_rate,
     }
 
+def get_monthly_spend(transactions):
+    """{month: total_spend} - gross outflow, excluding Savings & Investments
+    (saved, not spent), same definition used everywhere else "spend" is
+    shown (Dashboard trend chart's "Spending" line, calculate_avg_monthly_
+    spend below). Used by the Goals page for its spend-goal streak and
+    suggested-target calculations, which need a per-month breakdown rather
+    than one overall average."""
+    by_month = defaultdict(float)
+    for t in transactions:
+        if t.amount < 0 and t.category != 'Savings & Investments':
+            by_month[t.month] += abs(t.amount)
+    return dict(by_month)
+
 def calculate_avg_monthly_spend(transactions):
     """Real average monthly outflow: gross spend, excluding Savings &
     Investments (saved, not spent) - same definition as the Dashboard
     trend chart's "Spending" line. Salary needs no explicit exclusion since
     it's income only and never has a negative amount. 0 if there's no
     spending data."""
-    by_month = defaultdict(float)
-    for t in transactions:
-        if t.amount < 0 and t.category != 'Savings & Investments':
-            by_month[t.month] += abs(t.amount)
+    by_month = get_monthly_spend(transactions)
     return sum(by_month.values()) / len(by_month) if by_month else 0
 
 def get_recurring_charges(transactions, min_months=2, window_months=3):

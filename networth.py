@@ -111,30 +111,46 @@ def get_asset_name_tags():
     db.close()
     return dict(rows)
 
-def get_total_net_worth_series(asset_names=None):
-    """Returns a DataFrame ['Date', 'Total']: one row per calendar day any
-    asset had a recorded value, across the FULL history (never filtered),
-    with each asset forward-filled to its last known value so a day only one
-    asset was updated still counts every other asset's last value.
-
-    If asset_names is given, only those assets are summed - e.g. to project
-    "just my pensions and ISA" rather than everything tracked."""
+def _daily_asset_pivot(asset_names=None):
+    """Shared by get_total_net_worth_series and get_per_asset_series: one row
+    per calendar day any asset had a recorded value, across the FULL history
+    (never filtered), one column per asset, each forward-filled to its last
+    known value so a day only one asset was updated still carries every other
+    asset's last value. Empty DataFrame if there's no matching history."""
     records = get_all_asset_history()
     if asset_names is not None:
         records = [r for r in records if r.asset_name in asset_names]
     if not records:
-        return pd.DataFrame(columns=['Date', 'Total'])
+        return pd.DataFrame()
 
     df = pd.DataFrame([{
         'Date': r.recorded_at, 'Asset': r.asset_name, 'Value': r.value
     } for r in records])
     df['DateOnly'] = df['Date'].dt.date
-    asset_pivot = df.sort_values('Date').pivot_table(
+    return df.sort_values('Date').pivot_table(
         index='DateOnly', columns='Asset', values='Value', aggfunc='last'
     ).ffill()
+
+def get_total_net_worth_series(asset_names=None):
+    """Returns a DataFrame ['Date', 'Total'] - the per-asset pivot summed
+    across every asset (or just asset_names, if given - e.g. to project
+    "just my pensions and ISA" rather than everything tracked)."""
+    asset_pivot = _daily_asset_pivot(asset_names)
+    if asset_pivot.empty:
+        return pd.DataFrame(columns=['Date', 'Total'])
     daily_total = asset_pivot.sum(axis=1).reset_index()
     daily_total.columns = ['Date', 'Total']
     return daily_total
+
+def get_per_asset_series(asset_names=None):
+    """Returns a DataFrame ['Date', <asset name>, <asset name>, ...] - the
+    same forward-filled daily pivot as get_total_net_worth_series, but with
+    one column per asset instead of summed into a Total. Used for the Net
+    Worth page's optional per-asset breakdown line chart."""
+    asset_pivot = _daily_asset_pivot(asset_names)
+    if asset_pivot.empty:
+        return pd.DataFrame(columns=['Date'])
+    return asset_pivot.reset_index().rename(columns={'DateOnly': 'Date'})
 
 # Minimum span of history before an annualised growth rate is meaningful -
 # a few days of data would produce a wildly extrapolated rate
