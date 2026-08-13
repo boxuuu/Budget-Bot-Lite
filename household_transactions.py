@@ -45,12 +45,9 @@ def amount_to_float(amount_str):
 
 def save_household_transactions(transactions):
     """Same shape and duplicate-detection logic as database.save_transactions
-    - takes the same {'Date', 'Description', 'Amount'} dicts parse_transactions()
-    already produces, so the existing (Chase-tuned) PDF parser can be reused
-    as a starting point. Santander's statement layout is very likely
-    different in some way (date format, column order, multi-line
-    descriptions) - this hasn't been tested against a real Santander
-    statement yet, so the first real upload may need parser adjustments."""
+    - takes the same {'Date', 'Description', 'Amount'} dicts
+    csv_import.parse_bank_csv() produces for any bank profile, Santander
+    included."""
     db = get_household_transactions_db()
     saved = 0
     skipped = 0

@@ -6,7 +6,7 @@
 ## 1. Project Overview
 
 Budget Bot is a personal finance app built for Jonathan Cummins (Manchester, UK), running entirely
-locally on his MacBook Air M3. It parses Chase UK bank statement PDFs into a local SQLite database,
+locally on his MacBook Air M3. It parses bank statement CSV exports into a local SQLite database,
 categorises transactions using rule-matching with an Ollama-powered fallback (enriched with live web
 search for unfamiliar merchants), and gives a full picture of Jonathan's finances: a spending
 dashboard, a net worth tracker with growth projections, live-editable personal and household budgets,
@@ -53,7 +53,8 @@ important than visual polish, though both have had real investment.
 ## 5. Detailed Checklist
 
 ### Stage 1 — Core Transaction Pipeline
-- [x] Chase UK PDF statement parsing (`fitz`/PyMuPDF)
+- [x] Chase UK statement parsing — CSV export, via the profile-driven `csv_import.py` engine
+      (replaced the original PyMuPDF/`fitz` PDF parser 2026-08-12)
 - [x] Transaction storage (SQLite, `Transaction` model)
 - [x] Duplicate detection on upload (exact date + description + amount match)
 - [x] Merchant categorisation: known-rules dict + Ollama fallback
@@ -84,11 +85,10 @@ important than visual polish, though both have had real investment.
       (2026-07-17), sourced from a new, completely separate `HouseholdTransaction` table
       (`household_transactions.py`) for the joint Santander account — structurally isolated from
       Jonathan's personal Chase data, never touched by the Dashboard/Personal Budget/Chat
-- [x] Santander statement support: a dedicated `parse_santander_transactions` parser (Santander's
-      layout differs from Chase's enough that reusing `parse_transactions` wasn't viable — no year on
-      dates, no £/minus sign on amounts, money in/out inferred from balance movement), tested and
-      verified against Jonathan's real statement. Upload Statement page now has two side-by-side
-      boxes, Personal (Chase) and Household (Santander) (2026-07-20)
+- [x] Santander statement support: originally a dedicated `parse_santander_transactions` PDF parser
+      (2026-07-20, since replaced 2026-08-12 by the `SANTANDER` profile in `csv_import.py`'s shared
+      CSV engine). Upload Statement page has two side-by-side boxes, Personal (Chase) and Household
+      (Santander)
 
 ### Stage 4 — Dashboard & Analytics
 - [x] KPI row: Net Worth, Total Spent, Monthly Average, Savings Rate
@@ -160,14 +160,27 @@ Ideas raised in conversation, not committed to any stage yet. Resurface these if
 2. **In-month spend pace** — "you've spent £340 of a typical £450 Eating Out month, and it's only the
    12th" — projects the current month's trajectory against historical per-category averages. Lighter
    weight than a formal budget; sidesteps the Stage 8 budget-definition problem entirely.
-3. **Savings goal tracking** — per-named-pot progress (Wedding, Emergency Fund, mortgage overpayments
-   via Sprive) shown as "£X of £Y saved" against an implicit or explicit target, rather than the
-   current lump Savings & Investments figure.
+3. ~~**Savings goal tracking**~~ — **built 2026-08-12**, see the Goals page (`goals.py`) in the Session
+   Log — savings target + discretionary spend ceiling, with streaks, superseding this original idea.
 4. **Asset allocation view on Net Worth** — a % breakdown across cash / stocks / crypto / pension
    (AJ Bell pension, ISA, Coinbase, Barclays Shares) — the current total net worth figure hides
    diversification/risk exposure entirely.
 5. **Backup/export** — a one-click CSV/DB export. `budget_bot.db` is flagged "do not delete" in
    CLAUDE.md but has no backup story; it's a single local file holding years of net worth history.
+6. **Share Budget Bot with friends (Mac + Windows)** — assessed 2026-08-12, not committed to. Each
+   friend would run their own local copy (own SQLite file, own optional Ollama) rather than one
+   hosted instance, distributed via GitHub + setup instructions rather than a native installer, with
+   AI features (chat, smart categorisation) becoming optional rather than required. Real work
+   identified: strip personal identity out of LLM-facing prompts (`chat.py`/`categoriser.py` hardcode
+   "Jonathan"/"Manchester"); replace the hardcoded `analytics.SAVINGS_POT_NAMES`/
+   `EXCLUDED_FROM_SAVINGS` with a real per-user Settings UI; add a persisted `CategoryRule` table so
+   corrections on Manage Categories actually teach the app instead of only fixing one transaction;
+   make the Ollama fallback degrade gracefully (currently has no error handling — an absent Ollama
+   install would break the upload flow, not just skip AI features); and — the biggest lever — a
+   bank-agnostic CSV import path, since the PDF parsers only ever work for the exact bank they were
+   built against. Total estimate: roughly 1-2 weeks of focused work, most of it optional/incremental
+   rather than a single all-or-nothing rewrite. The CSV import piece was pulled forward and started
+   immediately (see Session Log) since Jonathan realized both his own banks offer CSV exports.
 
 ### Recurring charges checklist, built (2026-07-16)
 Jonathan's real concern turned out to be narrower and more actionable than a full subscription audit:
@@ -224,11 +237,10 @@ accounts (Chase personal, Santander household) with fully isolated data.
   reflecting this transfer rather than pure growth. No code change made (would need a way to tag a
   specific value change as "transfer, exclude from growth rate," which doesn't exist) — revisit only
   if per-asset projections become something Jonathan actually uses regularly.
-- **Two PDF parsers now, not one**: `parse_transactions` (Chase) and `parse_santander_transactions`
-  (Santander, added 2026-07-20) are separate functions tuned for each bank's specific layout — don't
-  assume one works for the other's statements, and don't try to unify them (the formats differ enough
-  — year-less dates, sign-less amounts inferred from balance movement on Santander's side — that a
-  shared parser would be more fragile than two focused ones).
+- ~~**Two PDF parsers now, not one**~~ — **superseded 2026-08-12**: both accounts now use CSV
+  exports via `csv_import.py`'s single profile-driven `parse_bank_csv()` engine instead of two
+  bank-specific PDF parsers. A new bank is a new `BankCsvProfile`, not new parsing code — see
+  `csv_import.py` and the Session Log entry below.
 - **No manual category-correction UI for household transactions yet**: Chase transactions have the
   Manage Categories page (browse, filter, manually correct); household Santander transactions only
   have the "Categorise uncategorised household transactions" button on the Household Budget page —
@@ -730,6 +742,81 @@ help tooltip on the KPI explaining what's excluded, since the number no longer m
 spent." Verified live: Monthly Average now reads £2,469.88 (cross-checked against a direct pandas
 calculation first) - a much more plausible discretionary figure than either the buggy £12,991.18 or
 the corrected-but-still-gross £8,599.27. Not yet committed.
+
+### 2026-08-12 (continued) — Replaced PDF statement upload with CSV (Chase + Santander)
+Jonathan asked how hard it would be to eventually share Budget Bot with friends. Assessed this
+separately (recorded above in §6 as a Suggested Feature) - not committed to, but the assessment
+flagged bank-specific PDF parsing as the single biggest limiter on how many friends could actually
+use the app. Discussing that, Jonathan realized both his own banks offer CSV exports and asked to
+switch now, partly for robustness (the Santander PDF parser needed real debugging effort to get
+working originally - no year on dates, amounts inferred from balance movement) and partly as a
+concrete first step toward "less personal, more portable." He specifically asked for the CSV import
+to be designed with other banks in mind, not two more one-off hardcoded parsers.
+
+Got real sample exports for both banks and analyzed the actual formats before writing anything:
+Chase (comma-delimited, a title row then a header, non-zero-padded dates like "1 August 2026",
+already-signed comma-formatted amounts) and Santander's "midata" export (semicolon-delimited, header
+is row 1, `DD/MM/YYYY` dates, a combined signed `Debit/Credit` column styled `-£142.03`, a
+non-transaction footer row). Santander's CSV export can't be scoped to one statement period like
+Chase's - it's always ~12 months, which the existing exact-match duplicate detection already handles
+correctly on every re-upload (confirmed the overhead is not a real performance concern at this app's
+scale before proceeding).
+
+Built `csv_import.py`: a `BankCsvProfile` dataclass (delimiter, column names, date format, and either
+a single signed amount column or separate debit/credit columns) plus one shared `parse_bank_csv()`
+engine that finds the header row by locating the profile's date-column label (robust to Chase's extra
+title row vs. Santander's none), and treats any row whose date field fails to parse as non-transaction
+noise to skip (this is what discards Santander's footer row, with no bank-specific footer logic
+needed). `CHASE` and `SANTANDER` are the two profiles defined so far - adding a friend's bank later is
+a new profile, not a new parser. Deliberately did not build a self-service column-mapping UI for
+non-technical friends to define their own profile - real feature, worth doing once an actual friend
+on an actual unsupported bank shows up, not speculatively now.
+
+Removed the now-dead PDF parsing code: `parse_transactions`, `parse_santander_transactions`, and
+their helpers (`is_date`, `is_amount`, `is_balance`, `is_santander_date`, `is_plain_number`), the
+`fitz` import, and (after confirming via repo-wide grep it was unused anywhere else) `PyMuPDF` from
+`requirements.txt`. Updated both Upload Statement uploaders to accept CSV instead of PDF. Updated
+`CLAUDE.md` (Tech stack, Project structure, Pages, Database models, Known Issues) - also caught and
+fixed two pieces of unrelated staleness found along the way: the Goals page/`goals.py` and Goal model
+were entirely missing from `CLAUDE.md` despite being built earlier this same session, and Suggested
+Feature idea #3 ("Savings goal tracking") was still listed as open despite being superseded by Goals.
+
+Verified thoroughly before considering this done: `parse_bank_csv` tested directly against both real
+sample files first (correct row counts - 156 Chase, 190 Santander - correct date/amount conversion,
+confirmed Santander's footer row excluded) before wiring into the UI at all. Live in the browser:
+uploaded both real files through the actual Upload Statement page, confirmed "Found N transactions"
+for both. For Chase (real, wanted data - his actual 14 Jul-13 Aug 2026 statement) went further and
+actually clicked Save: "Saved 69 new transactions. Skipped 87 duplicates" (the 87 correctly caught
+against transactions already in the database from prior PDF uploads - strong evidence the CSV parser
+produces output byte-compatible with what the old PDF parser used to produce), then re-uploaded the
+identical file and confirmed "Saved 0. Skipped 156" (full dedup). For Santander, the sample provided
+was privacy-redacted (merchant descriptions replaced with asterisks) - deliberately did NOT click Save
+in the live app, since that would have written meaningless placeholder text into Jonathan's real
+household ledger. Instead verified the identical save/dedup logic against an isolated in-memory SQLite
+database (same `HouseholdTransaction` model, never touching `budget_bot.db`): 190 saved on first pass,
+0 saved/190 skipped on re-upload. Confirmed afterward that the real household transaction count was
+unchanged (109, matching the last known count) and zero redacted rows leaked in. Spot-checked the
+newly-saved real Chase rows for clean parsing (no stray quotes/whitespace/HTML-entity artifacts) -
+correctly landed as "Uncategorised" pending the normal categorisation step, unrelated to this change.
+
+### 2026-08-12 (continued) — Dropped "(Chase)"/"(Santander)" from the Upload Statement labels
+Small follow-up in the same spirit as the CSV work above: Jonathan asked to remove the "(Chase)" and
+"(Santander)" parentheticals from the Upload Statement page's two card subheaders and the matching
+"Statements Uploaded" checklist labels - now plain "Personal" and "Household" - and flagged that,
+going forward, the app should keep being developed with a user-agnostic mindset rather than assuming
+Jonathan's own specific banks everywhere. Left the file-uploader hint text ("Upload your Chase
+transactions CSV export") and warning messages as-is, since those are still functionally accurate -
+Chase and Santander are the only two `BankCsvProfile`s that actually exist yet (see `csv_import.py`
+and the Session Log entry above) - only the two card *titles* were asked to be genericized. Verified
+live: both cards and both checklist columns now read "Personal"/"Household" with no console errors.
+
+**Noted for future sessions**: Jonathan wants a consistently user-agnostic bias in ongoing work on
+this app now, not just isolated to the CSV-import piece - e.g. prefer generic labels/wording over
+Jonathan- or bank-specific ones where it costs nothing to do so, even on features not directly related
+to the friends-sharing effort. Doesn't mean stripping personal specifics that are still load-bearing
+(the `CHASE`/`SANTANDER` profiles, `chat.py`'s Jonathan-specific system prompt, `analytics.py`'s
+named savings pots, etc. all still need Jonathan's real setup to function correctly today) - see the
+"Share Budget Bot with friends" assessment (§6) for the fuller list of what that would actually take.
 
 ---
 

@@ -6,7 +6,7 @@
 ## What this is
 Budget Bot is a personal finance app built in Python/Streamlit for Jonathan Cummins, based in Manchester, UK.
 It runs entirely locally on a MacBook Air M3 (24GB RAM) and uses Ollama for local LLM capabilities.
-The app parses bank statement PDFs from two separate accounts — Jonathan's personal Chase card and
+The app parses bank statement CSV exports from two separate accounts — Jonathan's personal Chase card and
 the household's joint Santander account, kept in completely separate database tables so household
 data never affects personal figures — stores transactions in a local SQLite database, categorises
 them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net worth tracker.
@@ -18,7 +18,7 @@ them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net
   merchant categorisation, `qwen2.5:14b` (slower, better reasoning) for the chat assistant's
   tool-calling and advice
 - **Web search:** ddgs (DuckDuckGo) for merchant categorisation context
-- **PDF parsing:** PyMuPDF (fitz)
+- **CSV parsing:** Python's built-in `csv` module, via a profile-driven engine (see `csv_import.py`)
 - **Charts:** Plotly
 - **Language:** Python 3.9
 
@@ -41,6 +41,11 @@ them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net
   Household Budget (works on either Transaction table, since it only relies on shared attribute
   names — date/description/amount/category/month)
 - `chat.py` — Ollama chat interface with spending context and tool-calling for category/net worth updates
+- `goals.py` — savings/spend-ceiling goals with streaks (Goal model, append-only like AssetValue - a
+  new target always takes effect next month, never retroactively, and any edit resets its streak)
+- `csv_import.py` — bank-agnostic CSV statement parsing: a `BankCsvProfile` dataclass (delimiter,
+  column names, date format) plus one shared `parse_bank_csv()` engine, so a new bank is a new
+  profile rather than a new parser. `CHASE` and `SANTANDER` profiles are the two currently defined
 - `.streamlit/config.toml` — theme config (brand accent colour only, so the native light/dark/system
   toggle keeps working)
 - `budget_bot.db` — SQLite database (do not delete)
@@ -62,14 +67,17 @@ them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net
    computed total and an editable % split, the same Actual-spend/Recurring-Charges pattern as
    Personal Budget but sourced from the separate Santander `HouseholdTransaction` table, and a
    "Categorise uncategorised household transactions" button
-5. **Upload Statement** — two side-by-side upload boxes: Personal (Chase, feeds the Dashboard/
-   Personal Budget/Chat) and Household (Santander, feeds only the Household Budget page). Santander's
-   PDF layout is different enough from Chase's (no year on dates, no £/minus sign on amounts, money
-   in/out direction inferred from balance movement rather than read from the text) that it has its
-   own parser, `parse_santander_transactions`, rather than reusing Chase's `parse_transactions`
-6. **View Transactions** — full transaction table with month, merchant, and category filters and
+5. **Goals** — a Savings Goal and a Discretionary Spend Ceiling, each with a streak (consecutive
+   complete months hit), a "so far this month" progress figure, and a "Set a new target" form
+   pre-filled with a suggested value from recent history. A new target only ever takes effect next
+   month, and any edit resets the streak. Also has a compact tile on the Dashboard
+6. **Upload Statement** — two side-by-side upload boxes: Personal (Chase, feeds the Dashboard/
+   Personal Budget/Chat) and Household (Santander, feeds only the Household Budget page). Both
+   accept a bank CSV export, parsed via `csv_import.py`'s profile-driven `parse_bank_csv()` engine
+   (see Tech stack/Project structure above) rather than a bank-specific parser
+7. **View Transactions** — full transaction table with month, merchant, and category filters and
    categorisation buttons (personal Chase transactions only)
-7. **Manage Categories** — review and correct merchant categories (personal Chase transactions only)
+8. **Manage Categories** — review and correct merchant categories (personal Chase transactions only)
 
 There is no standalone Chat page — the chat interface (natural language questions, category
 fixes, and net worth updates, with a Confirm/Cancel click required before writing to the database)
@@ -120,6 +128,15 @@ for scrollable message history.
   `household_transactions.HouseholdRecurringChargeDismissal`, kept as a separate table for the same
   reason (so Personal and Household dismissals never cross-contaminate).
 
+### Goal (goals.py)
+- id, goal_type (String — 'savings' or 'spend'), target_amount (Float), effective_month (String,
+  'Mon YYYY'), created_at (DateTime)
+- Append-only, like AssetValue — editing a goal never overwrites the current row, it inserts a new
+  one with a future effective_month (always "next calendar month" — see `next_effective_month()`),
+  so past months keep being judged by whatever target actually governed them at the time. Streaks
+  (`calculate_streak()`) only count months governed by the CURRENT (most recently set) row, which is
+  what makes any edit reset progress toward the goal.
+
 ## Categories used
 Salary, Groceries, Eating Out & Takeaway, Coffee & Beans, Shopping, Transport, Health & Fitness,
 Subscriptions, Phone & Internet, Insurance & Finance, Savings & Investments, Charity,
@@ -157,9 +174,11 @@ gross/unmodified by design.
 ## Known issues to be aware of
 - Duplicate widget key errors: always add unique key= arguments to all Streamlit widgets
 - Ollama context window: do not send all raw transactions to Ollama at once, use summaries instead
-- Chase's PDF parser (`parse_transactions`) is tuned for Chase UK statement format specifically;
-  Santander's (`parse_santander_transactions`) is a separate parser tuned for Santander's format —
-  don't assume one works for the other's PDFs
+- CSV statement parsing (`csv_import.py`) is profile-driven, not bank-specific code — the `CHASE`
+  and `SANTANDER` profiles just describe each bank's delimiter/column names/date format. A new
+  bank's export is a new `BankCsvProfile`, not a new parser function, as long as it fits the "one
+  header row, one row per transaction, either a single signed amount column or separate debit/credit
+  columns" shape most UK bank CSV exports follow
 
 ## Current focus
 See `PLAN.md` §8/§9 for the up-to-date priority list and what's already built — this file covers

@@ -1,7 +1,5 @@
 import streamlit as st
-import fitz
 import pandas as pd
-import re
 from database import save_transactions, load_all_transactions, get_months
 from categoriser import categorise_all, recategorise_all
 from database import get_db, Transaction
@@ -128,136 +126,6 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
-def is_date(text):
-    return bool(re.match(r'\d{2} \w{3} \d{4}', text))
-
-def is_amount(text):
-    return bool(re.match(r'-?£[\d,]+\.\d{2}', text))
-
-def is_balance(text):
-    return bool(re.match(r'£[\d,]+\.\d{2}', text))
-
-def parse_transactions(lines):
-    transactions = []
-    i = 0
-    
-    while i < len(lines) and lines[i] != 'Balance':
-        i += 1
-    i += 1
-
-    while i < len(lines):
-        if is_date(lines[i]):
-            date = lines[i]
-            i += 1
-            
-            if i < len(lines):
-                description = lines[i]
-                i += 1
-            
-            while i < len(lines) and not is_amount(lines[i]) and not is_date(lines[i]):
-                i += 1
-            
-            if i < len(lines) and is_amount(lines[i]):
-                amount = lines[i]
-                i += 1
-                
-                if i < len(lines) and is_balance(lines[i]):
-                    i += 1
-                
-                if description not in ['Opening balance', 'Closing balance']:
-                    transactions.append({
-                        'Date': date,
-                        'Description': description,
-                        'Amount': amount
-                    })
-        else:
-            i += 1
-
-    return transactions
-
-def is_santander_date(text):
-    # e.g. "3rd Jun", "23rd Jun" - Santander's transaction rows never
-    # include a year, unlike Chase's "01 Jan 2026"
-    return bool(re.match(r'^\d{1,2}(st|nd|rd|th) [A-Za-z]{3}$', text))
-
-def is_plain_number(text):
-    # e.g. "35.00", "1,585.35" - no £ sign and no minus sign anywhere in
-    # Santander's extracted text, unlike Chase's "-£35.00"
-    return bool(re.match(r'^\d[\d,]*\.\d{2}$', text))
-
-def parse_santander_transactions(lines):
-    """Santander's statement layout differs from Chase's in three ways that
-    rule out reusing parse_transactions(): dates have no year (the year has
-    to be read from the "Your transactions X to Y" header instead), amounts
-    have no £ or minus sign, and whether a transaction is money in or out
-    isn't in the text at all - it has to be inferred by comparing each row's
-    running balance to the previous one."""
-    month_year_map = {}
-    section_start = None
-    for i, line in enumerate(lines):
-        m = re.match(
-            r'Your transactions (\d{1,2}\w{2}) (\w{3}) (\d{4}) to (\d{1,2}\w{2}) (\w{3}) (\d{4})',
-            line
-        )
-        if m:
-            month_year_map[m.group(2)] = m.group(3)
-            month_year_map[m.group(5)] = m.group(6)
-            section_start = i + 1
-            break
-
-    if section_start is None:
-        return []
-
-    transactions = []
-    previous_balance = None
-    i = section_start
-
-    while i < len(lines):
-        if is_santander_date(lines[i]):
-            date_text = lines[i]
-            i += 1
-
-            if i >= len(lines):
-                break
-            description = lines[i]
-            i += 1
-
-            # A real transaction row is Date, Description, Amount, Balance
-            # (2 numbers); the opening/closing "Balance brought/carried
-            # forward" rows are Date, Description, Balance only (1 number) -
-            # collecting up to 2 number-like lines distinguishes them.
-            numbers = []
-            while i < len(lines) and is_plain_number(lines[i]) and len(numbers) < 2:
-                numbers.append(lines[i])
-                i += 1
-
-            if len(numbers) == 2:
-                amount = float(numbers[0].replace(',', ''))
-                balance = float(numbers[1].replace(',', ''))
-
-                if previous_balance is not None and balance < previous_balance:
-                    signed_amount = -amount
-                else:
-                    signed_amount = amount
-
-                day = re.match(r'\d+', date_text).group()
-                month = date_text.split()[1]
-                year = month_year_map.get(month, '')
-                full_date = f"{int(day):02d} {month} {year}"
-
-                transactions.append({
-                    'Date': full_date,
-                    'Description': description,
-                    'Amount': f"{'-' if signed_amount < 0 else ''}£{abs(signed_amount):,.2f}"
-                })
-                previous_balance = balance
-            elif len(numbers) == 1:
-                previous_balance = float(numbers[0].replace(',', ''))
-        else:
-            i += 1
-
-    return transactions
 
 # --- Sidebar ---
 st.sidebar.title("Navigation")
@@ -661,72 +529,59 @@ elif page == "Upload Statement":
     st.header(":material/upload_file: Upload Statement")
 
     from household_transactions import save_household_transactions
+    from csv_import import parse_bank_csv, CHASE, SANTANDER
 
     col_personal, col_household = st.columns(2)
 
     with col_personal, st.container(border=True, key="card_upload_personal"):
-        st.subheader("Personal (Chase)")
+        st.subheader("Personal")
         st.caption("Feeds the Dashboard, Personal Budget, and Chat.")
 
         uploaded_file = st.file_uploader(
-            "Upload your Chase statement PDF", type="pdf", key="upload_personal_pdf"
+            "Upload your Chase transactions CSV export", type="csv", key="upload_personal_csv"
         )
 
         if uploaded_file is not None:
-            pdf = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-
-            lines = []
-            for page_num in pdf:
-                for line in page_num.get_text().split('\n'):
-                    line = line.strip()
-                    if line:
-                        lines.append(line)
-
-            transactions = parse_transactions(lines)
+            content = uploaded_file.read().decode('utf-8')
+            transactions = parse_bank_csv(content, CHASE)
 
             if transactions:
-                st.success(f"Found {len(transactions)} transactions in this statement")
+                st.success(f"Found {len(transactions)} transactions in this export")
 
                 if st.button("Save to Budget Bot", key="save_personal_statement"):
                     saved, skipped = save_transactions(transactions)
                     st.success(f"Saved {saved} new transactions. Skipped {skipped} duplicates.")
             else:
-                st.warning("No transactions found")
+                st.warning(
+                    "No transactions found. Make sure this is the CSV export from Chase's "
+                    "\"Download statement\" feature, not a different file."
+                )
 
     with col_household, st.container(border=True, key="card_upload_household"):
-        st.subheader("Household (Santander)")
+        st.subheader("Household")
         st.caption(
             "Kept in a completely separate table - never included in the Dashboard, Personal "
             "Budget, or Chat. Only feeds the Household Budget page's Recurring Charges."
         )
 
-        household_pdf = st.file_uploader(
-            "Upload your Santander statement PDF", type="pdf", key="upload_household_pdf"
+        household_csv = st.file_uploader(
+            "Upload your Santander transactions CSV export", type="csv", key="upload_household_csv"
         )
 
-        if household_pdf is not None:
-            pdf = fitz.open(stream=household_pdf.read(), filetype="pdf")
-
-            lines = []
-            for page_num in pdf:
-                for line in page_num.get_text().split('\n'):
-                    line = line.strip()
-                    if line:
-                        lines.append(line)
-
-            parsed_household_transactions = parse_santander_transactions(lines)
+        if household_csv is not None:
+            household_content = household_csv.read().decode('utf-8')
+            parsed_household_transactions = parse_bank_csv(household_content, SANTANDER)
 
             if parsed_household_transactions:
-                st.success(f"Found {len(parsed_household_transactions)} transactions in this statement")
+                st.success(f"Found {len(parsed_household_transactions)} transactions in this export")
 
                 if st.button("Save to Household Budget", key="save_household_statement"):
                     saved, skipped = save_household_transactions(parsed_household_transactions)
                     st.success(f"Saved {saved} new transactions. Skipped {skipped} duplicates.")
             else:
                 st.warning(
-                    "No transactions found. This can happen if the statement's date range isn't "
-                    "in the expected \"Your transactions X to Y\" format, or the PDF's text layout "
-                    "differs from what's been seen so far."
+                    "No transactions found. Make sure this is the CSV export from Santander's "
+                    "\"midata\" transactions download, not a different file."
                 )
 
     from household_transactions import get_household_months
@@ -741,13 +596,13 @@ elif page == "Upload Statement":
     col_personal_checklist, col_household_checklist = st.columns(2)
 
     with col_personal_checklist, st.container(border=True, key="card_upload_checklist_personal"):
-        st.markdown("**Personal (Chase)**")
+        st.markdown("**Personal**")
         personal_checklist = get_upload_checklist(get_months())
         for month_label, uploaded in personal_checklist:
             st.checkbox(month_label, value=uploaded, disabled=True, key=f"check_personal_{month_label}")
 
     with col_household_checklist, st.container(border=True, key="card_upload_checklist_household"):
-        st.markdown("**Household (Santander)**")
+        st.markdown("**Household**")
         household_checklist = get_upload_checklist(get_household_months())
         for month_label, uploaded in household_checklist:
             st.checkbox(month_label, value=uploaded, disabled=True, key=f"check_household_{month_label}")
