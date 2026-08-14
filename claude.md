@@ -4,20 +4,19 @@
 > on this project, and update it at the end of any session that changes the codebase.
 
 ## What this is
-Budget Bot is a personal finance app built in Python/Streamlit for Jonathan Cummins, based in Manchester, UK.
-It runs entirely locally on a MacBook Air M3 (24GB RAM) and uses Ollama for local LLM capabilities.
-The app parses bank statement CSV exports from two separate accounts — Jonathan's personal Chase card and
-the household's joint Santander account, kept in completely separate database tables so household
-data never affects personal figures — stores transactions in a local SQLite database, categorises
-them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net worth tracker.
+This is the **lite** edition of Budget Bot, a personal finance app built in Python/Streamlit. It's a
+fork of a private build that adds local Ollama-based AI (merchant categorisation fallback and a chat
+assistant) — this edition deliberately has none of that, so it can be shared and run by anyone
+without needing a local LLM set up. It runs entirely locally, with your data staying in a local
+SQLite database on your own machine. The app parses bank statement CSV exports from two separate
+accounts — a personal card and a household joint account, kept in completely separate database
+tables so household data never affects personal figures — stores transactions in a local SQLite
+database, categorises them via a rules list plus your own saved corrections, and displays spending
+analysis, charts, and a net worth tracker.
 
 ## Tech stack
 - **Frontend:** Streamlit
 - **Database:** SQLite via SQLAlchemy
-- **LLM:** Ollama running two local models for two different jobs — `llama3.2` (3B, fast) for batch
-  merchant categorisation, `qwen2.5:14b` (slower, better reasoning) for the chat assistant's
-  tool-calling and advice
-- **Web search:** ddgs (DuckDuckGo) for merchant categorisation context
 - **CSV parsing:** Python's built-in `csv` module, via a profile-driven engine (see `csv_import.py`)
 - **Charts:** Plotly
 - **Language:** Python 3.9
@@ -29,19 +28,19 @@ them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net
 - `household_transactions.py` — a completely separate table/pipeline for the household's joint
   Santander account (HouseholdTransaction, HouseholdRecurringChargeDismissal models) — deliberately
   isolated from `database.py` so it's structurally impossible for household data to leak into the
-  Dashboard, Personal Budget, or Chat, which only ever query `database.Transaction`
+  Dashboard or Personal Budget, which only ever query `database.Transaction`
 - `categoriser.py` — merchant categorisation logic, checked in order: a user's own past correction
-  (`CategoryRule` table, exact merchant match), then hardcoded `KNOWN_RULES` (substring match), then
-  Ollama fallback (with ddgs web search context); `categorise_all`/`recategorise_all` take the
-  Transaction model class as a parameter, so the same logic works for both `database.Transaction` and
-  `household_transactions.HouseholdTransaction`
+  (`CategoryRule` table, exact merchant match), then hardcoded `KNOWN_RULES` (substring match). No AI
+  fallback in this edition — anything neither matches is left `Uncategorised` for a manual fix on the
+  Manage Categories page, which then saves a `CategoryRule` so it's covered for good.
+  `categorise_all`/`recategorise_all` take the Transaction model class as a parameter, so the same
+  logic works for both `database.Transaction` and `household_transactions.HouseholdTransaction`
 - `networth.py` — net worth/asset tracking models and functions (AssetValue model)
 - `budget.py` — personal and household budget models and functions (PersonalBudgetItem, HouseholdBudgetItem, BudgetSetting)
 - `analytics.py` — shared cross-page calculations: chronological month-sorting, savings-rate
-  calculation, recurring-charge detection, used by the Dashboard, Chat, Personal Budget, and
-  Household Budget (works on either Transaction table, since it only relies on shared attribute
-  names — date/description/amount/category/month)
-- `chat.py` — Ollama chat interface with spending context and tool-calling for category/net worth updates
+  calculation, recurring-charge detection, used by the Dashboard, Personal Budget, and Household
+  Budget (works on either Transaction table, since it only relies on shared attribute names —
+  date/description/amount/category/month)
 - `goals.py` — savings/spend-ceiling goals with streaks (Goal model, append-only like AssetValue - a
   new target always takes effect next month, never retroactively, and any edit resets its streak)
 - `csv_import.py` — bank-agnostic CSV statement parsing: a `BankCsvProfile` dataclass (delimiter,
@@ -74,19 +73,14 @@ them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net
    pre-filled with a suggested value from recent history. A new target only ever takes effect next
    month, and any edit resets the streak. Also has a compact tile on the Dashboard
 6. **Upload Statement** — two side-by-side upload boxes: Personal (Chase, feeds the Dashboard/
-   Personal Budget/Chat) and Household (Santander, feeds only the Household Budget page). Both
-   accept a bank CSV export, parsed via `csv_import.py`'s profile-driven `parse_bank_csv()` engine
-   (see Tech stack/Project structure above) rather than a bank-specific parser
+   Personal Budget) and Household (Santander, feeds only the Household Budget page). Both accept a
+   bank CSV export, parsed via `csv_import.py`'s profile-driven `parse_bank_csv()` engine (see Tech
+   stack/Project structure above) rather than a bank-specific parser
 7. **View Transactions** — full transaction table with month, merchant, and category filters and
    categorisation buttons (personal Chase transactions only)
 8. **Manage Categories** — review and correct merchant categories (personal Chase transactions only)
 
-There is no standalone Chat page — the chat interface (natural language questions, category
-fixes, and net worth updates, with a Confirm/Cancel click required before writing to the database)
-lives permanently in the sidebar below the page navigation, rendered on every page regardless of
-which one is selected. It uses Streamlit's inline `st.chat_input` positioning (only pins to the
-bottom of the viewport when placed directly in the main body) with a fixed-height `st.container`
-for scrollable message history.
+There is no Chat/AI assistant in this edition — see "What this is" above.
 
 ## Database models
 ### Transaction (database.py)
@@ -103,8 +97,8 @@ for scrollable message history.
 - Created/overwritten automatically whenever "Update category" is used on the Manage Categories
   page, so a manual correction survives future statement uploads and full re-categorisations
   instead of resetting to `Uncategorised` every time. Checked before `KNOWN_RULES`, so a human
-  correction always wins over both the hardcoded rules and Ollama. Shared across
-  `database.Transaction` and `household_transactions.HouseholdTransaction`, same as `KNOWN_RULES`.
+  correction always wins over the hardcoded rules. Shared across `database.Transaction` and
+  `household_transactions.HouseholdTransaction`, same as `KNOWN_RULES`.
 
 ### HouseholdRecurringChargeDismissal (household_transactions.py)
 - id, merchant (String), reason (String — 'already_budgeted' or 'not_recurring'), dismissed_at (DateTime)
@@ -154,16 +148,19 @@ Salary, Groceries, Eating Out & Takeaway, Coffee & Beans, Shopping, Transport, H
 Subscriptions, Phone & Internet, Insurance & Finance, Savings & Investments, Charity,
 Bills & Utilities, Rent & Housing, Other
 
-Salary is income only (identified via "From B E" transactions) and is never included in spending
-totals. Savings & Investments figures used for the Savings Rate calculation (Dashboard KPI, the
-trend chart's Savings line, and Chat) are net of transfers to/from Jonathan's named savings pots
-(Round up, Emergency Fund, Wedding, Overflow) — money moving back out of a pot reduces the figure
-rather than being invisible. Fun Money is excluded entirely, in both directions, since it behaves as
-a discretionary spending buffer rather than genuine savings, not a store of value — including it
-made the Savings Rate KPI swing deeply negative most months despite otherwise strong, consistent
-saving. This treatment applies only to the Savings Rate/trend-line calculation, not to the
-Dashboard's general spending views (pie chart, Total Spent, top merchants), which stay
-gross/unmodified by design.
+Salary is income only and is never included in spending totals. `analytics.py`'s salary detection is
+still hardcoded to one specific payer string (`"From B E"`) inherited from the private build - it
+won't match a different user's payslip description, so the Savings Rate KPI shows "N/A" until this
+is genericised or a user manually categorises one salary transaction as `Salary` (which then
+persists via `CategoryRule` for future statements, same as any other correction). Savings &
+Investments figures used for the Savings Rate calculation (Dashboard KPI and the trend chart's
+Savings line) are net of transfers to/from a set of named savings pots, also still hardcoded from the
+private build (Round up, Emergency Fund, Wedding, Overflow) — money moving back out of a pot reduces
+the figure rather than being invisible. Fun Money is excluded entirely, in both directions, since it
+behaves as a discretionary spending buffer rather than genuine savings, not a store of value. This
+treatment applies only to the Savings Rate/trend-line calculation, not to the Dashboard's general
+spending views (pie chart, Total Spent, top merchants), which stay gross/unmodified by design. Both
+the salary string and the pot names are candidates for making user-configurable later.
 
 ## Coding preferences
 - No emojis anywhere in the UI
@@ -172,7 +169,6 @@ gross/unmodified by design.
 - All pages must have unique keys on any selectbox or widget to avoid duplicate element errors
 - Virtual environment is at ~/budget-bot/venv — always assume it is active
 - To run the app: streamlit run app.py
-- Ollama must be running separately for LLM features to work
 
 ## Current data
 - Personal Chase transactions grow as Jonathan uploads statements via the Upload Statement page's
@@ -185,7 +181,6 @@ gross/unmodified by design.
 
 ## Known issues to be aware of
 - Duplicate widget key errors: always add unique key= arguments to all Streamlit widgets
-- Ollama context window: do not send all raw transactions to Ollama at once, use summaries instead
 - CSV statement parsing (`csv_import.py`) is profile-driven, not bank-specific code — the `CHASE`
   and `SANTANDER` profiles just describe each bank's delimiter/column names/date format. A new
   bank's export is a new `BankCsvProfile`, not a new parser function, as long as it fits the "one

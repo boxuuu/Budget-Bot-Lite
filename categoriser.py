@@ -1,4 +1,3 @@
-import ollama
 from sqlalchemy import create_engine, Column, String
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -8,10 +7,9 @@ class CategoryRule(Base):
     """A merchant -> category override, created automatically whenever a
     correction is made on the Manage Categories page, so a manual fix
     sticks for future statement uploads instead of resetting to
-    Uncategorised (and possibly a fresh, different Ollama guess) every
-    time the same merchant reappears. Checked before KNOWN_RULES, since a
-    human correction should always win over both the hardcoded rules and
-    Ollama's guess. Keyed on the exact (lowercased) merchant description -
+    Uncategorised every time the same merchant reappears. Checked before
+    KNOWN_RULES, since a human correction should always win over the
+    hardcoded rules. Keyed on the exact (lowercased) merchant description -
     the same granularity the Manage Categories correction already applies
     at - rather than a substring, so correcting one merchant can never
     accidentally reclassify an unrelated one."""
@@ -61,14 +59,15 @@ CATEGORIES = [
     "Other"
 ]
 
-# Known rules - these are applied before Ollama is even consulted.
-# Corrections made on the Manage Categories page are no longer added here
-# by hand - they're saved to the CategoryRule table above instead, and
-# checked before this dict (see categorise_all).
+# Known rules for recognisable UK-wide merchants/brands - applied before
+# anything is left Uncategorised for manual review (there's no AI fallback
+# in this build). Kept deliberately generic: entries that only made sense
+# for one household's own accounts (a salary reference string, a specific
+# plumber, a specific council, an internal account nickname) have been
+# removed - a new user's manual corrections on the Manage Categories page
+# cover those instead, and persist automatically via the CategoryRule table
+# above from then on.
 KNOWN_RULES = {
-    # Income, not spend - checked first since it's conceptually distinct
-    # from everything else in this dict
-    "from b e": "Salary",
     "tesco": "Groceries",
     "aldi": "Groceries",
     "asda": "Groceries",
@@ -111,23 +110,16 @@ KNOWN_RULES = {
     "sippdeal": "Savings & Investments",
     "sprive": "Savings & Investments",
     "jetts": "Health & Fitness",
-    "hivejiujitsu": "Health & Fitness",
-    "empire grappling": "Health & Fitness",
     "hospice": "Charity",
     "give-star": "Charity",
     "hsbc": "Insurance & Finance",
     "aviva": "Insurance & Finance",
     "homeprotect": "Insurance & Finance",
     "surewise": "Insurance & Finance",
-    "house acc": "Rent & Housing",
-    # Household (Santander) account rules - map directly to existing
-    # Household Bills line items (Energy: Octopus, Mortgage: Nationwide,
-    # Council Tax: Manchester Council)
+    # Common UK household bill providers
     "octopus": "Bills & Utilities",
     "nationwide b s": "Rent & Housing",
-    "manchester c c": "Bills & Utilities",
     "united utilities": "Bills & Utilities",
-    "jd plumbing": "Bills & Utilities",
     "wedding": "Savings & Investments",
     "emergency fund": "Savings & Investments",
     "fun money": "Savings & Investments",
@@ -152,8 +144,8 @@ KNOWN_RULES = {
     # transaction alone - "Other" is the honest answer here, not a
     # categoriser failure. Description includes the withdrawal location
     # (e.g. "Cash withdrawal, E, LEIGH, WN7 1QX"), so without this rule
-    # every branch/location produces a distinct "unique merchant" that
-    # burns a separate Ollama + web search call for the same non-answer.
+    # every branch/location would show up as a distinct "unique merchant"
+    # left Uncategorised for the same non-answer.
     "cash withdrawal": "Other",
 }
 
@@ -164,125 +156,43 @@ def apply_known_rules(merchant_name):
             return category
     return None
 
-def get_merchant_context(merchant_name, all_transactions):
-    matching = [t for t in all_transactions if t.description == merchant_name]
-    if not matching:
-        return ""
-    
-    amounts = [abs(t.amount) for t in matching]
-    avg_amount = sum(amounts) / len(amounts)
-    frequency = len(matching)
-    
-    return f"Appears {frequency} times, average amount £{avg_amount:.2f}"
-
-def search_merchant_web(merchant_name):
-    """Look up a merchant online to help the categoriser figure out what
-    kind of business it is. Returns "" (same as no context) on any failure -
-    the caller doesn't need to know whether the search worked.
-
-    Queries avoid the words "UK company", which reliably rank Companies
-    House registration pages first - those only confirm a business exists,
-    never what it actually does (a pub named "Overdraught" turned up nothing
-    but Companies House boilerplate under the old query). Leading with a
-    Manchester-anchored query instead favours local review/listing results.
-    Any Companies House snippet that still slips through is filtered out."""
-    from ddgs import DDGS
-
-    queries = [
-        f"{merchant_name} Manchester",
-        f"{merchant_name} what kind of business",
-    ]
-
-    for query in queries:
-        try:
-            results = DDGS().text(query, max_results=3)
-            useful = [
-                r.get('body', '') for r in results
-                if 'companies house' not in r.get('body', '').lower()
-            ]
-            snippets = " ".join(useful[:2])
-            if snippets:
-                print(f"  [web] {merchant_name} -> found")
-                return snippets[:400].replace('\n', ' ')
-        except Exception:
-            continue
-
-    print(f"  [web] {merchant_name} -> none")
-    return ""
-
-def categorise_with_ollama(merchant_name, context, web_context=""):
-    prompt = f"""You are a UK personal finance assistant categorising bank transactions for someone based in Manchester.
-
-Categorise this merchant into exactly one of these categories:
-{chr(10).join(f'- {c}' for c in CATEGORIES)}
-
-Merchant: {merchant_name}
-Context: {context}
-Web search info: {web_context}
-
-Some guidance:
-- Coffee shops and specialty coffee roasters = Coffee & Beans
-- Restaurants, pubs, bars, fast food, takeaway apps = Eating Out & Takeaway
-- Supermarkets and food delivery services = Groceries
-- Gym memberships, martial arts, sport = Health & Fitness
-- Streaming, gaming, digital subscriptions = Subscriptions
-- Clothing, electronics, home goods = Shopping
-- Pension, ISA, savings transfers = Savings & Investments
-- If it looks like a pub or bar based on the name = Eating Out & Takeaway
-- If unsure between Shopping and Other, pick Shopping for retail names
-
-Reply with only the category name, nothing else.
-"""
-    
-    response = ollama.chat(
-        model='llama3.2',
-        messages=[{'role': 'user', 'content': prompt}]
-    )
-    
-    result = response['message']['content'].strip()
-    
-    if result in CATEGORIES:
-        return result
-    return "Other"
-
 def categorise_all(db_session, Transaction):
-    all_transactions = db_session.query(Transaction).all()
-    uncategorised = [t for t in all_transactions if t.category == 'Uncategorised']
-    
+    """Categorises every transaction a rule (user-saved or hardcoded)
+    matches, and leaves the rest as Uncategorised - there's no AI fallback
+    in this build, so an unmatched merchant needs a manual fix on the
+    Manage Categories page (which then saves a CategoryRule and covers it
+    for good)."""
+    uncategorised = db_session.query(Transaction).filter_by(category='Uncategorised').all()
+
     if not uncategorised:
         return 0, 0
-    
+
     unique_merchants = list(set(t.description for t in uncategorised))
     rules_applied = 0
-    ollama_used = 0
-    
+
     print(f"Categorising {len(unique_merchants)} unique merchants...")
-    
+
     merchant_map = {}
     for merchant in unique_merchants:
-        # A user's own past correction always wins, then the hardcoded
-        # rules, then Ollama as a last resort
+        # A user's own past correction always wins over the hardcoded rules
         category = get_user_rule(merchant) or apply_known_rules(merchant)
         if category:
             merchant_map[merchant] = category
             rules_applied += 1
             print(f"  [rule] {merchant} -> {category}")
         else:
-            # Fall back to Ollama, with web search context to help it figure
-            # out what kind of business an unfamiliar merchant actually is
-            context = get_merchant_context(merchant, all_transactions)
-            web_context = search_merchant_web(merchant)
-            category = categorise_with_ollama(merchant, context, web_context)
-            merchant_map[merchant] = category
-            ollama_used += 1
-            print(f"  [ollama] {merchant} -> {category}")
-    
-    # Apply to all transactions
+            print(f"  [no rule] {merchant} -> left Uncategorised")
+
+    # Apply to all transactions a rule actually matched
+    still_uncategorised = 0
     for t in uncategorised:
-        t.category = merchant_map[t.description]
-    
+        if t.description in merchant_map:
+            t.category = merchant_map[t.description]
+        else:
+            still_uncategorised += 1
+
     db_session.commit()
-    return rules_applied, ollama_used
+    return rules_applied, still_uncategorised
 
 def recategorise_all(db_session, Transaction):
     # Reset all categories and redo from scratch

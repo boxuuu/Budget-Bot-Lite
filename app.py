@@ -150,77 +150,6 @@ page = st.sidebar.radio(
 
 st.sidebar.divider()
 
-# --- Persistent Chat (always visible, independent of which page is selected) ---
-with st.sidebar:
-    st.subheader("Chat with Budget Bot")
-
-    from chat import chat_with_budget_bot, update_category
-    from networth import update_asset_value
-
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    if "pending_action" not in st.session_state:
-        st.session_state.pending_action = None
-
-    chat_history = st.container(height=400)
-    with chat_history:
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.write(message["content"])
-
-        if st.session_state.pending_action:
-            action = st.session_state.pending_action
-            with st.chat_message("assistant"), st.container(border=True, key="chatcard_pending_action"):
-                st.write(action["display"])
-                confirm_col, cancel_col = st.columns(2)
-                with confirm_col:
-                    if st.button("Confirm", key="confirm_pending_action", use_container_width=True):
-                        if action["type"] == "update_networth":
-                            update_asset_value(action["asset_name"], action["value"])
-                            result_text = f"Updated {action['asset_name']} to £{action['value']:,.2f}."
-                        else:
-                            count = update_category(action["merchant_name"], action["new_category"])
-                            result_text = f"Updated {count} transaction(s) to {action['new_category']}."
-                        st.session_state.messages.append({"role": "assistant", "content": result_text})
-                        st.session_state.pending_action = None
-                        st.rerun()
-                with cancel_col:
-                    if st.button("Cancel", key="cancel_pending_action", use_container_width=True):
-                        st.session_state.messages.append({"role": "assistant", "content": "Okay, no changes made."})
-                        st.session_state.pending_action = None
-                        st.rerun()
-
-    if prompt := st.chat_input("Ask Budget Bot something..."):
-        if st.session_state.pending_action:
-            st.session_state.pending_action = None
-
-        st.session_state.messages.append({
-            "role": "user",
-            "content": prompt
-        })
-
-        with chat_history:
-            with st.chat_message("user"):
-                st.write(prompt)
-
-            with st.chat_message("assistant"):
-                with st.spinner("Thinking..."):
-                    result = chat_with_budget_bot(
-                        st.session_state.messages[:-1],
-                        prompt
-                    )
-                    st.write(result["text"])
-
-        if result["pending_action"]:
-            st.session_state.pending_action = result["pending_action"]
-            st.rerun()
-        else:
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": result["text"]
-            })
-
 # --- Dashboard Page ---
 if page == "Dashboard":
     st.header(":material/space_dashboard: Dashboard")
@@ -535,7 +464,7 @@ elif page == "Upload Statement":
 
     with col_personal, st.container(border=True, key="card_upload_personal"):
         st.subheader("Personal")
-        st.caption("Feeds the Dashboard, Personal Budget, and Chat.")
+        st.caption("Feeds the Dashboard and Personal Budget.")
 
         uploaded_file = st.file_uploader(
             "Upload your Chase transactions CSV export", type="csv", key="upload_personal_csv"
@@ -560,8 +489,8 @@ elif page == "Upload Statement":
     with col_household, st.container(border=True, key="card_upload_household"):
         st.subheader("Household")
         st.caption(
-            "Kept in a completely separate table - never included in the Dashboard, Personal "
-            "Budget, or Chat. Only feeds the Household Budget page's Recurring Charges."
+            "Kept in a completely separate table - never included in the Dashboard or Personal "
+            "Budget. Only feeds the Household Budget page's Recurring Charges."
         )
 
         household_csv = st.file_uploader(
@@ -1253,9 +1182,9 @@ elif page == "Household Budget":
         if st.button("Categorise uncategorised household transactions", key="categorise_household"):
             with st.spinner("Categorising..."):
                 hdb = get_household_transactions_db()
-                rules, ai = categorise_all(hdb, HouseholdTransaction)
+                rules, still_uncategorised = categorise_all(hdb, HouseholdTransaction)
                 hdb.close()
-                st.success(f"Done. {rules} categorised by rules, {ai} by Ollama")
+                st.success(f"Done. {rules} categorised by rules, {still_uncategorised} left for manual review")
 
     household_transactions_data = load_all_household_transactions()
 
@@ -1527,19 +1456,19 @@ elif page == "Manage Categories":
         col1, col2 = st.columns(2)
         with col1:
             if st.button("Categorise uncategorised"):
-                with st.spinner("Categorising... this may take a minute"):
+                with st.spinner("Categorising..."):
                     db = get_db()
-                    rules, ai = categorise_all(db, Transaction)
+                    rules, still_uncategorised = categorise_all(db, Transaction)
                     db.close()
-                    st.success(f"Done. {rules} categorised by rules, {ai} by Ollama")
+                    st.success(f"Done. {rules} categorised by rules, {still_uncategorised} left for manual review")
 
         with col2:
             if st.button("Re-categorise everything"):
-                with st.spinner("Re-categorising all 935 transactions... this may take a few minutes"):
+                with st.spinner("Re-categorising..."):
                     db = get_db()
-                    rules, ai = recategorise_all(db, Transaction)
+                    rules, still_uncategorised = recategorise_all(db, Transaction)
                     db.close()
-                    st.success(f"Done. {rules} categorised by rules, {ai} by Ollama")
+                    st.success(f"Done. {rules} categorised by rules, {still_uncategorised} left for manual review")
 
     with st.container(border=True, key="card_manage_merchant_table"):
         db = get_db()
