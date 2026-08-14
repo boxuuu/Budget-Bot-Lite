@@ -1174,7 +1174,9 @@ elif page == "Household Budget":
 
     from budget import (
         get_household_items, replace_household_items, get_household_total,
-        get_household_split_percent, set_household_split_percent
+        get_household_split_percent, set_household_split_percent,
+        get_household_person1_name, set_household_person1_name,
+        get_household_person2_name, set_household_person2_name
     )
 
     with st.container(border=True, key="card_household_bills"):
@@ -1208,22 +1210,35 @@ elif page == "Household Budget":
 
     with st.container(border=True, key="card_household_split"):
         st.subheader("Split")
+
+        name_col1, name_col2 = st.columns(2)
+        with name_col1:
+            person1_name = st.text_input(
+                "Person 1 name", value=get_household_person1_name(), key="household_person1_name_input"
+            )
+        with name_col2:
+            person2_name = st.text_input(
+                "Person 2 name", value=get_household_person2_name(), key="household_person2_name_input"
+            )
+
         split_pct = st.number_input(
-            "Jonny's share (%)", min_value=0.0, max_value=100.0, step=1.0,
+            f"{person1_name}'s share (%)", min_value=0.0, max_value=100.0, step=1.0,
             value=get_household_split_percent(), key="household_split_input"
         )
-        if st.button("Save Split %", key="save_split_pct"):
+        if st.button("Save Split", key="save_split_pct"):
+            set_household_person1_name(person1_name)
+            set_household_person2_name(person2_name)
             set_household_split_percent(split_pct)
             st.success("Saved")
             st.rerun()
 
-        jonny_share = total * (split_pct / 100)
-        steph_share = total * (1 - split_pct / 100)
+        person1_share = total * (split_pct / 100)
+        person2_share = total * (1 - split_pct / 100)
         col1, col2 = st.columns(2)
         with col1:
-            st.metric("Jonny", f"£{jonny_share:,.2f}")
+            st.metric(person1_name, f"£{person1_share:,.2f}")
         with col2:
-            st.metric("Steph", f"£{steph_share:,.2f}")
+            st.metric(person2_name, f"£{person2_share:,.2f}")
 
     from household_transactions import (
         load_all_household_transactions, get_household_transactions_db, HouseholdTransaction,
@@ -1506,7 +1521,7 @@ elif page == "Manage Categories":
     st.write("Review and correct how each merchant has been categorised.")
 
     from database import get_db, Transaction
-    from categoriser import CATEGORIES
+    from categoriser import CATEGORIES, save_user_rule
 
     with st.container(border=True, key="card_manage_categorise_actions"):
         col1, col2 = st.columns(2)
@@ -1558,6 +1573,7 @@ elif page == "Manage Categories":
         all_merchants = sorted([m.description for m in merchants])
         selected_merchant = st.selectbox("Select merchant to fix", all_merchants, key="select_merchant")
         new_category = st.selectbox("Assign correct category", CATEGORIES, key="new_category")
+        st.caption("Also remembered for this merchant on future statement uploads.")
 
         if st.button("Update category"):
             db = get_db()
@@ -1568,4 +1584,5 @@ elif page == "Manage Categories":
                 t.category = new_category
             db.commit()
             db.close()
+            save_user_rule(selected_merchant, new_category)
             st.success(f"Updated all '{selected_merchant}' transactions to '{new_category}'")

@@ -185,3 +185,15 @@ def get_household_split_percent():
 
 def set_household_split_percent(value):
     set_setting('household_split_percent', value)
+
+def get_household_person1_name():
+    return get_setting('household_person1_name', 'Person 1')
+
+def set_household_person1_name(value):
+    set_setting('household_person1_name', value)
+
+def get_household_person2_name():
+    return get_setting('household_person2_name', 'Person 2')
+
+def set_household_person2_name(value):
+    set_setting('household_person2_name', value)

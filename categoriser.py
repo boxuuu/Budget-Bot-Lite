@@ -1,6 +1,47 @@
 import ollama
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, Column, String
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+Base = declarative_base()
+
+class CategoryRule(Base):
+    """A merchant -> category override, created automatically whenever a
+    correction is made on the Manage Categories page, so a manual fix
+    sticks for future statement uploads instead of resetting to
+    Uncategorised (and possibly a fresh, different Ollama guess) every
+    time the same merchant reappears. Checked before KNOWN_RULES, since a
+    human correction should always win over both the hardcoded rules and
+    Ollama's guess. Keyed on the exact (lowercased) merchant description -
+    the same granularity the Manage Categories correction already applies
+    at - rather than a substring, so correcting one merchant can never
+    accidentally reclassify an unrelated one."""
+    __tablename__ = 'category_rules'
+
+    merchant = Column(String, primary_key=True)  # lowercased, exact match
+    category = Column(String)
+
+def get_categoriser_db():
+    engine = create_engine('sqlite:///budget_bot.db')
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    return Session()
+
+def get_user_rule(merchant_name):
+    db = get_categoriser_db()
+    rule = db.query(CategoryRule).filter_by(merchant=merchant_name.lower()).first()
+    db.close()
+    return rule.category if rule else None
+
+def save_user_rule(merchant_name, category):
+    db = get_categoriser_db()
+    key = merchant_name.lower()
+    rule = db.query(CategoryRule).filter_by(merchant=key).first()
+    if rule:
+        rule.category = category
+    else:
+        db.add(CategoryRule(merchant=key, category=category))
+    db.commit()
+    db.close()
 
 CATEGORIES = [
     "Salary",
@@ -20,8 +61,10 @@ CATEGORIES = [
     "Other"
 ]
 
-# Known rules - these are applied before Ollama is even consulted
-# Add to this list as you correct things on the Manage Categories page
+# Known rules - these are applied before Ollama is even consulted.
+# Corrections made on the Manage Categories page are no longer added here
+# by hand - they're saved to the CategoryRule table above instead, and
+# checked before this dict (see categorise_all).
 KNOWN_RULES = {
     # Income, not spend - checked first since it's conceptually distinct
     # from everything else in this dict
@@ -217,8 +260,9 @@ def categorise_all(db_session, Transaction):
     
     merchant_map = {}
     for merchant in unique_merchants:
-        # Try known rules first
-        category = apply_known_rules(merchant)
+        # A user's own past correction always wins, then the hardcoded
+        # rules, then Ollama as a last resort
+        category = get_user_rule(merchant) or apply_known_rules(merchant)
         if category:
             merchant_map[merchant] = category
             rules_applied += 1

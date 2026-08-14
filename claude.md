@@ -30,9 +30,10 @@ them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net
   Santander account (HouseholdTransaction, HouseholdRecurringChargeDismissal models) — deliberately
   isolated from `database.py` so it's structurally impossible for household data to leak into the
   Dashboard, Personal Budget, or Chat, which only ever query `database.Transaction`
-- `categoriser.py` — merchant categorisation logic using known rules + Ollama fallback (with ddgs web
-  search context); `categorise_all`/`recategorise_all` take the Transaction model class as a
-  parameter, so the same logic works for both `database.Transaction` and
+- `categoriser.py` — merchant categorisation logic, checked in order: a user's own past correction
+  (`CategoryRule` table, exact merchant match), then hardcoded `KNOWN_RULES` (substring match), then
+  Ollama fallback (with ddgs web search context); `categorise_all`/`recategorise_all` take the
+  Transaction model class as a parameter, so the same logic works for both `database.Transaction` and
   `household_transactions.HouseholdTransaction`
 - `networth.py` — net worth/asset tracking models and functions (AssetValue model)
 - `budget.py` — personal and household budget models and functions (PersonalBudgetItem, HouseholdBudgetItem, BudgetSetting)
@@ -64,9 +65,10 @@ them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net
    checklist (merchants paid ≥2 of the last 3 months, with Add to budget / dismiss actions — dismissals
    expire after 6 months rather than hiding a merchant forever)
 4. **Household Budget** — live-editable bills grid (service, provider, renewal date, amount) with a
-   computed total and an editable % split, the same Actual-spend/Recurring-Charges pattern as
-   Personal Budget but sourced from the separate Santander `HouseholdTransaction` table, and a
-   "Categorise uncategorised household transactions" button
+   computed total and an editable % split between two editable-name household members (no names
+   hardcoded in the UI), the same Actual-spend/Recurring-Charges pattern as Personal Budget but
+   sourced from the separate Santander `HouseholdTransaction` table, and a "Categorise uncategorised
+   household transactions" button
 5. **Goals** — a Savings Goal and a Discretionary Spend Ceiling, each with a streak (consecutive
    complete months hit), a "so far this month" progress figure, and a "Set a new target" form
    pre-filled with a suggested value from recent history. A new target only ever takes effect next
@@ -96,6 +98,14 @@ for scrollable message history.
   separate table for the joint Santander account. Nothing outside `household_transactions.py` and
   the Household Budget page queries this table.
 
+### CategoryRule (categoriser.py)
+- merchant (String, primary key, lowercased exact match), category (String)
+- Created/overwritten automatically whenever "Update category" is used on the Manage Categories
+  page, so a manual correction survives future statement uploads and full re-categorisations
+  instead of resetting to `Uncategorised` every time. Checked before `KNOWN_RULES`, so a human
+  correction always wins over both the hardcoded rules and Ollama. Shared across
+  `database.Transaction` and `household_transactions.HouseholdTransaction`, same as `KNOWN_RULES`.
+
 ### HouseholdRecurringChargeDismissal (household_transactions.py)
 - id, merchant (String), reason (String — 'already_budgeted' or 'not_recurring'), dismissed_at (DateTime)
 - Mirrors `budget.RecurringChargeDismissal` but kept in a separate table so dismissing a merchant on
@@ -119,8 +129,10 @@ for scrollable message history.
 
 ### BudgetSetting (budget.py)
 - key (String, primary key), value (String, cast to float at the call site)
-- Generic key/value table. Two keys in use: `personal_total_income` (manual override for Personal
-  Budget) and `household_split_percent` (editable % split between the two people in the household).
+- Generic key/value table. Keys in use: `personal_total_income` (manual override for Personal
+  Budget), `household_split_percent` (editable % split between the two people in the household), and
+  `household_person1_name`/`household_person2_name` (editable display names for the Household Budget
+  Split card, default "Person 1"/"Person 2" — no names hardcoded in the UI).
 
 ### RecurringChargeDismissal (budget.py)
 - id, merchant (String), reason (String — 'already_budgeted' or 'not_recurring'), dismissed_at (DateTime)
