@@ -1,8 +1,5 @@
 # Budget Bot
 
-> See `PLAN.md` for current progress, known issues, and next actions — read it before starting work
-> on this project, and update it at the end of any session that changes the codebase.
-
 ## What this is
 This is the **lite** edition of Budget Bot, a personal finance app built in Python/Streamlit. It's a
 fork of a private build that adds local Ollama-based AI (merchant categorisation fallback and a chat
@@ -23,7 +20,7 @@ analysis, charts, and a net worth tracker.
 
 ## Project structure
 - `app.py` — main Streamlit app, all pages and navigation
-- `database.py` — SQLite models and transaction functions (Transaction model — Jonathan's personal
+- `database.py` — SQLite models and transaction functions (Transaction model — your personal
   Chase transactions only)
 - `household_transactions.py` — a completely separate table/pipeline for the household's joint
   Santander account (HouseholdTransaction, HouseholdRecurringChargeDismissal models) — deliberately
@@ -85,7 +82,7 @@ There is no Chat/AI assistant in this edition — see "What this is" above.
 ## Database models
 ### Transaction (database.py)
 - id, date (String), description (String), amount (Float), category (String), month (String)
-- Jonathan's personal Chase card only.
+- Your personal Chase card only.
 
 ### HouseholdTransaction (household_transactions.py)
 - Same shape as Transaction (id, date, description, amount, category, month), but a completely
@@ -113,8 +110,8 @@ There is no Chat/AI assistant in this edition — see "What this is" above.
 - id, section (String — 'Money In' or 'Money Out'), name (String), amount (Float)
 - No history — editing overwrites the current figure (unlike AssetValue). "Money In" items are
   reference-only and not summed by any formula; the actual income figure used in calculations is
-  a separate manually-entered setting (see BudgetSetting) since Jonathan doesn't have a full
-  salary-sacrifice breakdown to derive it from.
+  a separate manually-entered setting (see BudgetSetting), for anyone who doesn't have a full
+  salary-sacrifice breakdown to derive it from automatically.
 
 ### HouseholdBudgetItem (budget.py)
 - id, service (String), provider (String), renewal_date (String, informational only), amount (Float)
@@ -170,15 +167,6 @@ the salary string and the pot names are candidates for making user-configurable 
 - Virtual environment is at ~/budget-bot/venv — always assume it is active
 - To run the app: streamlit run app.py
 
-## Current data
-- Personal Chase transactions grow as Jonathan uploads statements via the Upload Statement page's
-  "Personal (Chase)" box — see PLAN.md for the current count and date range at any point in time.
-- Household Santander transactions grow the same way via the "Household (Santander)" box — a
-  completely separate table, see `household_transactions.py`.
-- Net worth data imported from Worth It app export going back to 2024
-- Assets tracked: Private Pension (AJ Bell), Emergency Fund, Barclays Shares (Equate),
-  Coinbase, Stocks & Shares ISA (AJ Bell), Workplace Pension (L&G)
-
 ## Known issues to be aware of
 - Duplicate widget key errors: always add unique key= arguments to all Streamlit widgets
 - CSV statement parsing (`csv_import.py`) is profile-driven, not bank-specific code — the `CHASE`
@@ -186,7 +174,3 @@ the salary string and the pot names are candidates for making user-configurable 
   bank's export is a new `BankCsvProfile`, not a new parser function, as long as it fits the "one
   header row, one row per transaction, either a single signed amount column or separate debit/credit
   columns" shape most UK bank CSV exports follow
-
-## Current focus
-See `PLAN.md` §8/§9 for the up-to-date priority list and what's already built — this file covers
-architecture/structure, not current status.
