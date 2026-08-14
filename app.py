@@ -640,10 +640,7 @@ elif page == "Net Worth":
 
     records = get_all_asset_history()
 
-    if not records:
-        st.info("No net worth data yet. Import your Worth It export above.")
-
-    elif st.session_state.nw_selected_asset:
+    if st.session_state.nw_selected_asset:
         # --- Single asset detail view ---
         asset = st.session_state.nw_selected_asset
 
@@ -753,214 +750,219 @@ elif page == "Net Worth":
                 st.rerun()
 
     else:
-        df = pd.DataFrame([{
-            'Date': r.recorded_at,
-            'Asset': r.asset_name,
-            'Tag': r.tag,
-            'Value': r.value
-        } for r in records])
+        if records:
+            df = pd.DataFrame([{
+                'Date': r.recorded_at,
+                'Asset': r.asset_name,
+                'Tag': r.tag,
+                'Value': r.value
+            } for r in records])
 
-        # --- Time filter ---
-        col1, col2, col3, col4, col5 = st.columns(5)
-        now = datetime.utcnow()
-        filters = {
-            'All': None,
-            '1 Year': now - timedelta(days=365),
-            'YTD': datetime(now.year, 1, 1),
-            '6 Months': now - timedelta(days=182),
-            '1 Month': now - timedelta(days=30)
-        }
+            # --- Time filter ---
+            col1, col2, col3, col4, col5 = st.columns(5)
+            now = datetime.utcnow()
+            filters = {
+                'All': None,
+                '1 Year': now - timedelta(days=365),
+                'YTD': datetime(now.year, 1, 1),
+                '6 Months': now - timedelta(days=182),
+                '1 Month': now - timedelta(days=30)
+            }
 
-        if 'nw_filter' not in st.session_state:
-            st.session_state.nw_filter = 'All'
+            if 'nw_filter' not in st.session_state:
+                st.session_state.nw_filter = 'All'
 
-        for col, label in zip([col1, col2, col3, col4, col5], filters.keys()):
-            with col:
-                if st.button(label, key=f"filter_{label}"):
-                    st.session_state.nw_filter = label
+            for col, label in zip([col1, col2, col3, col4, col5], filters.keys()):
+                with col:
+                    if st.button(label, key=f"filter_{label}"):
+                        st.session_state.nw_filter = label
 
-        selected_filter = st.session_state.nw_filter
-        cutoff = filters[selected_filter]
-        if cutoff:
-            df = df[df['Date'] >= cutoff]
+            selected_filter = st.session_state.nw_filter
+            cutoff = filters[selected_filter]
+            if cutoff:
+                df = df[df['Date'] >= cutoff]
 
-        st.caption(f"Showing: {selected_filter}")
+            st.caption(f"Showing: {selected_filter}")
 
-        # --- Total net worth ---
-        with st.container(border=True, key="card_nw_total"):
-            # Full, unfiltered daily total (forward-filled) computed once in
-            # networth.py; the selected time filter is applied to this result,
-            # not to the raw records, so an asset that wasn't updated inside the
-            # filter window still counts using its last known value.
-            full_daily_total = get_total_net_worth_series()
-            daily_total = (
-                full_daily_total[full_daily_total['Date'] >= cutoff.date()]
-                if cutoff else full_daily_total
-            )
-
-            # Current total and its change over the selected filter period
-            latest_total = daily_total.iloc[-1]['Total'] if not daily_total.empty else 0
-            first_total = daily_total.iloc[0]['Total'] if not daily_total.empty else 0
-            pct_change = ((latest_total - first_total) / first_total * 100) if first_total else 0
-
-            with st.container(key="nw_total_metric"):
-                st.metric(
-                    "Current Total Assets",
-                    f"£{latest_total:,.0f}",
-                    delta=f"{pct_change:+.1f}% ({selected_filter})"
+            # --- Total net worth ---
+            with st.container(border=True, key="card_nw_total"):
+                # Full, unfiltered daily total (forward-filled) computed once in
+                # networth.py; the selected time filter is applied to this result,
+                # not to the raw records, so an asset that wasn't updated inside the
+                # filter window still counts using its last known value.
+                full_daily_total = get_total_net_worth_series()
+                daily_total = (
+                    full_daily_total[full_daily_total['Date'] >= cutoff.date()]
+                    if cutoff else full_daily_total
                 )
 
-            st.subheader("Total Assets Over Time")
+                # Current total and its change over the selected filter period
+                latest_total = daily_total.iloc[-1]['Total'] if not daily_total.empty else 0
+                first_total = daily_total.iloc[0]['Total'] if not daily_total.empty else 0
+                pct_change = ((latest_total - first_total) / first_total * 100) if first_total else 0
 
-            show_per_asset = st.checkbox("Show per-asset breakdown", key="nw_show_per_asset")
+                with st.container(key="nw_total_metric"):
+                    st.metric(
+                        "Current Total Assets",
+                        f"£{latest_total:,.0f}",
+                        delta=f"{pct_change:+.1f}% ({selected_filter})"
+                    )
 
-            fig_total = px.line(
-                daily_total, x='Date', y='Total',
-                labels={'Total': 'Total Assets (£)', 'Date': ''},
-            )
-            fig_total.update_traces(line_color='#1D9E75', line_width=2, name='Total', showlegend=show_per_asset)
+                st.subheader("Total Assets Over Time")
 
-            if show_per_asset:
-                # Same forward-filled daily pivot the Total line is summed
-                # from, just not summed - one column per asset. Filtered by
-                # the same time-range cutoff as daily_total above, for
-                # consistency with the rest of this chart.
-                full_per_asset = get_per_asset_series()
-                per_asset = (
-                    full_per_asset[full_per_asset['Date'] >= cutoff.date()]
-                    if cutoff else full_per_asset
-                )
-                asset_columns = [c for c in per_asset.columns if c != 'Date']
+                show_per_asset = st.checkbox("Show per-asset breakdown", key="nw_show_per_asset")
 
-                # Validated categorical palette (fixed hue order, same one
-                # used by the Dashboard's category pie chart) - colors follow
-                # the asset's name alphabetically, not its current rank, so a
-                # given asset keeps the same color across every time filter.
-                # More than 8 assets folds the smallest into "Other" (muted
-                # gray) rather than generating a 9th hue.
-                palette = ['#2a78d6', '#008300', '#e87ba4', '#eda100', '#1baf7a', '#eb6834', '#4a3aa7', '#e34948']
-                if len(asset_columns) > len(palette):
-                    latest = per_asset[asset_columns].iloc[-1].sort_values(ascending=False)
-                    top_assets = sorted(latest.index[:len(palette)].tolist())
-                    other_assets = [a for a in asset_columns if a not in top_assets]
-                    per_asset = per_asset.copy()
-                    per_asset['Other'] = per_asset[other_assets].sum(axis=1)
-                    asset_columns = top_assets + ['Other']
-
-                color_map = {name: palette[i] for i, name in enumerate(sorted(a for a in asset_columns if a != 'Other'))}
-                color_map['Other'] = '#898781'
-
-                for name in asset_columns:
-                    fig_total.add_trace(go.Scatter(
-                        x=per_asset['Date'], y=per_asset[name],
-                        mode='lines', name=name,
-                        line=dict(color=color_map[name], width=1.5),
-                    ))
-
-            fig_total.update_layout(
-                yaxis_tickprefix='£',
-                yaxis_tickformat=',.0f',
-                plot_bgcolor='rgba(0,0,0,0)',
-                paper_bgcolor='rgba(0,0,0,0)',
-                margin=dict(l=0, r=0, t=0, b=0),
-                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1, title=None)
-            )
-
-            st.plotly_chart(fig_total, use_container_width=True)
-
-        # --- Net worth projection ---
-        # Deliberately a separate chart/card from Total Assets Over Time above,
-        # not an overlay on it - the projection is anchored on the TRUE latest
-        # total from full history (via project_net_worth) and always runs
-        # PROJECTION_YEARS forward regardless of the time filter selected above,
-        # so sharing one linear axis with a filtered actual-history line (e.g.
-        # "1 Month") squashed the actual line flat. Kept in its own card, on its
-        # own axis, so neither view distorts the other.
-        with st.container(border=True, key="card_nw_projection"):
-            st.subheader("Net Worth Projection")
-
-            full_daily_total = get_total_net_worth_series()
-            projection = project_net_worth(years=PROJECTION_YEARS)
-
-            if projection['ok']:
-                fig_proj = px.line(
-                    full_daily_total, x='Date', y='Total',
+                fig_total = px.line(
+                    daily_total, x='Date', y='Total',
                     labels={'Total': 'Total Assets (£)', 'Date': ''},
                 )
-                fig_proj.update_traces(line_color='#1D9E75', line_width=2, name='Actual', showlegend=True)
-                fig_proj.update_layout(
+                fig_total.update_traces(line_color='#1D9E75', line_width=2, name='Total', showlegend=show_per_asset)
+
+                if show_per_asset:
+                    # Same forward-filled daily pivot the Total line is summed
+                    # from, just not summed - one column per asset. Filtered by
+                    # the same time-range cutoff as daily_total above, for
+                    # consistency with the rest of this chart.
+                    full_per_asset = get_per_asset_series()
+                    per_asset = (
+                        full_per_asset[full_per_asset['Date'] >= cutoff.date()]
+                        if cutoff else full_per_asset
+                    )
+                    asset_columns = [c for c in per_asset.columns if c != 'Date']
+
+                    # Validated categorical palette (fixed hue order, same one
+                    # used by the Dashboard's category pie chart) - colors follow
+                    # the asset's name alphabetically, not its current rank, so a
+                    # given asset keeps the same color across every time filter.
+                    # More than 8 assets folds the smallest into "Other" (muted
+                    # gray) rather than generating a 9th hue.
+                    palette = ['#2a78d6', '#008300', '#e87ba4', '#eda100', '#1baf7a', '#eb6834', '#4a3aa7', '#e34948']
+                    if len(asset_columns) > len(palette):
+                        latest = per_asset[asset_columns].iloc[-1].sort_values(ascending=False)
+                        top_assets = sorted(latest.index[:len(palette)].tolist())
+                        other_assets = [a for a in asset_columns if a not in top_assets]
+                        per_asset = per_asset.copy()
+                        per_asset['Other'] = per_asset[other_assets].sum(axis=1)
+                        asset_columns = top_assets + ['Other']
+
+                    color_map = {name: palette[i] for i, name in enumerate(sorted(a for a in asset_columns if a != 'Other'))}
+                    color_map['Other'] = '#898781'
+
+                    for name in asset_columns:
+                        fig_total.add_trace(go.Scatter(
+                            x=per_asset['Date'], y=per_asset[name],
+                            mode='lines', name=name,
+                            line=dict(color=color_map[name], width=1.5),
+                        ))
+
+                fig_total.update_layout(
                     yaxis_tickprefix='£',
                     yaxis_tickformat=',.0f',
                     plot_bgcolor='rgba(0,0,0,0)',
                     paper_bgcolor='rgba(0,0,0,0)',
-                    margin=dict(l=0, r=0, t=0, b=0)
+                    margin=dict(l=0, r=0, t=0, b=0),
+                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1, title=None)
                 )
 
-                anchor_ts = pd.Timestamp(projection['anchor_date'])
-                rate = projection['rate']
-                future_dates = [anchor_ts + pd.DateOffset(years=yr) for yr in range(PROJECTION_YEARS + 1)]
-                future_values = [projection['anchor_value'] * (1 + rate) ** yr for yr in range(PROJECTION_YEARS + 1)]
+                st.plotly_chart(fig_total, use_container_width=True)
 
-                fig_proj.add_trace(go.Scatter(
-                    x=future_dates, y=future_values,
-                    mode='lines',
-                    line=dict(color='#1D9E75', width=2, dash='dash'),
-                    opacity=0.5,
-                    name=f'Projected ({rate*100:.1f}%/yr)'
-                ))
+            # --- Net worth projection ---
+            # Deliberately a separate chart/card from Total Assets Over Time above,
+            # not an overlay on it - the projection is anchored on the TRUE latest
+            # total from full history (via project_net_worth) and always runs
+            # PROJECTION_YEARS forward regardless of the time filter selected above,
+            # so sharing one linear axis with a filtered actual-history line (e.g.
+            # "1 Month") squashed the actual line flat. Kept in its own card, on its
+            # own axis, so neither view distorts the other.
+            with st.container(border=True, key="card_nw_projection"):
+                st.subheader("Net Worth Projection")
 
-                st.plotly_chart(fig_proj, use_container_width=True)
+                full_daily_total = get_total_net_worth_series()
+                projection = project_net_worth(years=PROJECTION_YEARS)
 
-                st.caption(
-                    f"Dashed line: a rough {PROJECTION_YEARS}-year projection based on your full asset "
-                    f"history, assuming your historical blended growth rate of {projection['rate']*100:.1f}%/year "
-                    f"continues. This rate reflects both market performance and your own contributions over "
-                    f"time - it is not a pure investment return, and it is not a guarantee of future results."
-                )
-            else:
-                st.caption("Not enough net worth history yet to show a projection.")
+                if projection['ok']:
+                    fig_proj = px.line(
+                        full_daily_total, x='Date', y='Total',
+                        labels={'Total': 'Total Assets (£)', 'Date': ''},
+                    )
+                    fig_proj.update_traces(line_color='#1D9E75', line_width=2, name='Actual', showlegend=True)
+                    fig_proj.update_layout(
+                        yaxis_tickprefix='£',
+                        yaxis_tickformat=',.0f',
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        margin=dict(l=0, r=0, t=0, b=0)
+                    )
 
-        # --- Asset list ---
-        with st.container(border=True, key="card_nw_assetlist"):
-            st.subheader("Assets")
-            st.caption("Click an asset to see its full history")
+                    anchor_ts = pd.Timestamp(projection['anchor_date'])
+                    rate = projection['rate']
+                    future_dates = [anchor_ts + pd.DateOffset(years=yr) for yr in range(PROJECTION_YEARS + 1)]
+                    future_values = [projection['anchor_value'] * (1 + rate) ** yr for yr in range(PROJECTION_YEARS + 1)]
 
-            asset_summary = df.sort_values('Date').groupby('Asset').agg(
-                Value=('Value', 'last'),
-                First=('Value', 'first'),
-                Tag=('Tag', 'last')
-            ).reset_index().sort_values('Value', ascending=False)
+                    fig_proj.add_trace(go.Scatter(
+                        x=future_dates, y=future_values,
+                        mode='lines',
+                        line=dict(color='#1D9E75', width=2, dash='dash'),
+                        opacity=0.5,
+                        name=f'Projected ({rate*100:.1f}%/yr)'
+                    ))
 
-            header = st.columns([4, 2, 2, 2])
-            header[0].caption("ASSET")
-            header[1].caption("CATEGORY")
-            header[2].caption("VALUE")
-            header[3].caption(f"GROWTH ({selected_filter})")
+                    st.plotly_chart(fig_proj, use_container_width=True)
 
-            for _, row in asset_summary.iterrows():
-                cols = st.columns([4, 2, 2, 2])
-                with cols[0]:
-                    if st.button(row['Asset'], key=f"nw_asset_{row['Asset']}", use_container_width=True):
-                        st.session_state.nw_selected_asset = row['Asset']
-                        st.rerun()
-                with cols[1]:
-                    st.write(row['Tag'])
-                with cols[2]:
-                    st.write(f"£{row['Value']:,.0f}")
-                with cols[3]:
-                    # Growth over the same selected time-range filter as the
-                    # "Current Total Assets" delta above - the first and last
-                    # recorded value for this asset within that window.
-                    pct = ((row['Value'] - row['First']) / row['First'] * 100) if row['First'] else 0
-                    if pct > 0:
-                        st.markdown(f":green[+{pct:.1f}%]")
-                    elif pct < 0:
-                        st.markdown(f":red[{pct:.1f}%]")
-                    else:
-                        st.markdown(":gray[0.0%]")
+                    st.caption(
+                        f"Dashed line: a rough {PROJECTION_YEARS}-year projection based on your full asset "
+                        f"history, assuming your historical blended growth rate of {projection['rate']*100:.1f}%/year "
+                        f"continues. This rate reflects both market performance and your own contributions over "
+                        f"time - it is not a pure investment return, and it is not a guarantee of future results."
+                    )
+                else:
+                    st.caption("Not enough net worth history yet to show a projection.")
 
-        # Add or remove an asset
-        with st.expander("Add or Remove an Asset"):
+            # --- Asset list ---
+            with st.container(border=True, key="card_nw_assetlist"):
+                st.subheader("Assets")
+                st.caption("Click an asset to see its full history")
+
+                asset_summary = df.sort_values('Date').groupby('Asset').agg(
+                    Value=('Value', 'last'),
+                    First=('Value', 'first'),
+                    Tag=('Tag', 'last')
+                ).reset_index().sort_values('Value', ascending=False)
+
+                header = st.columns([4, 2, 2, 2])
+                header[0].caption("ASSET")
+                header[1].caption("CATEGORY")
+                header[2].caption("VALUE")
+                header[3].caption(f"GROWTH ({selected_filter})")
+
+                for _, row in asset_summary.iterrows():
+                    cols = st.columns([4, 2, 2, 2])
+                    with cols[0]:
+                        if st.button(row['Asset'], key=f"nw_asset_{row['Asset']}", use_container_width=True):
+                            st.session_state.nw_selected_asset = row['Asset']
+                            st.rerun()
+                    with cols[1]:
+                        st.write(row['Tag'])
+                    with cols[2]:
+                        st.write(f"£{row['Value']:,.0f}")
+                    with cols[3]:
+                        # Growth over the same selected time-range filter as the
+                        # "Current Total Assets" delta above - the first and last
+                        # recorded value for this asset within that window.
+                        pct = ((row['Value'] - row['First']) / row['First'] * 100) if row['First'] else 0
+                        if pct > 0:
+                            st.markdown(f":green[+{pct:.1f}%]")
+                        elif pct < 0:
+                            st.markdown(f":red[{pct:.1f}%]")
+                        else:
+                            st.markdown(":gray[0.0%]")
+        else:
+            st.info("No net worth data yet - add your first asset below, or import a Worth It export above.")
+
+        # Add or remove an asset - always reachable even before any data
+        # exists, so a new user isn't stuck needing a Worth It export just
+        # to get their first asset in
+        with st.expander("Add or Remove an Asset", expanded=not records):
             st.markdown("**Add a new asset**")
             add_cols = st.columns([3, 2, 2, 1])
             with add_cols[0]:
