@@ -458,7 +458,7 @@ elif page == "Upload Statement":
     st.header(":material/upload_file: Upload Statement")
 
     from household_transactions import save_household_transactions
-    from csv_import import parse_bank_csv, CHASE, SANTANDER
+    from csv_import import parse_bank_csv, decode_csv_bytes, CHASE, SANTANDER
 
     col_personal, col_household = st.columns(2)
 
@@ -471,7 +471,7 @@ elif page == "Upload Statement":
         )
 
         if uploaded_file is not None:
-            content = uploaded_file.read().decode('utf-8')
+            content = decode_csv_bytes(uploaded_file.read())
             transactions = parse_bank_csv(content, CHASE)
 
             if transactions:
@@ -498,7 +498,7 @@ elif page == "Upload Statement":
         )
 
         if household_csv is not None:
-            household_content = household_csv.read().decode('utf-8')
+            household_content = decode_csv_bytes(household_csv.read())
             parsed_household_transactions = parse_bank_csv(household_content, SANTANDER)
 
             if parsed_household_transactions:

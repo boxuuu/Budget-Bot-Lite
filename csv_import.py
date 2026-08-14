@@ -41,6 +41,20 @@ SANTANDER = BankCsvProfile(
 )
 
 
+def decode_csv_bytes(raw_bytes):
+    """Bank CSV exports aren't reliably UTF-8 - a Windows-originated export
+    commonly uses cp1252, where a currency symbol like £ is a single byte
+    (0xA3) that isn't valid UTF-8 on its own and raises UnicodeDecodeError.
+    Tries UTF-8 first (utf-8-sig also transparently strips a BOM, common
+    from Excel-saved exports), then cp1252, then latin-1 as a last resort -
+    latin-1 maps every byte value to a character, so it's guaranteed to
+    succeed even if some stranger encoding slips through."""
+    for encoding in ('utf-8-sig', 'cp1252', 'latin-1'):
+        try:
+            return raw_bytes.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+
 def _parse_amount(raw):
     """'-1,150.00' / '-£142.03' / '+£4.51' -> signed float. Stripping both
     the £ sign and thousands-separator commas covers every bank shape seen
