@@ -1541,48 +1541,51 @@ elif page == "Manage Categories":
                     db.close()
                     st.success(f"Done. {rules} categorised by rules, {ai} by Ollama")
 
-    with st.container(border=True, key="card_manage_merchant_table"):
-        db = get_db()
-        merchants = db.query(
-            Transaction.description,
-            Transaction.category
-        ).distinct(Transaction.description).all()
-        db.close()
+    db = get_db()
+    merchants = db.query(
+        Transaction.description,
+        Transaction.category
+    ).distinct(Transaction.description).all()
+    db.close()
 
-        merchant_df = pd.DataFrame([{
-            'Merchant': m.description,
-            'Category': m.category
-        } for m in merchants]).sort_values('Merchant')
+    if not merchants:
+        st.info("No transactions yet - upload a statement first")
+    else:
+        with st.container(border=True, key="card_manage_merchant_table"):
+            merchant_df = pd.DataFrame([{
+                'Merchant': m.description,
+                'Category': m.category
+            } for m in merchants]).sort_values('Merchant')
 
-        st.caption(f"{len(merchant_df)} unique merchants")
+            st.caption(f"{len(merchant_df)} unique merchants")
 
-        selected_cat = st.selectbox(
-            "Filter by category",
-            ["All categories"] + CATEGORIES,
-            key="filter_category"
-        )
+            selected_cat = st.selectbox(
+                "Filter by category",
+                ["All categories"] + CATEGORIES,
+                key="filter_category"
+            )
 
-        if selected_cat != "All categories":
-            merchant_df = merchant_df[merchant_df['Category'] == selected_cat]
+            if selected_cat != "All categories":
+                merchant_df = merchant_df[merchant_df['Category'] == selected_cat]
 
-        st.dataframe(merchant_df, use_container_width=True)
+            st.dataframe(merchant_df, use_container_width=True)
 
-    with st.container(border=True, key="card_manage_correct_category"):
-        st.subheader("Correct a category")
+        with st.container(border=True, key="card_manage_correct_category"):
+            st.subheader("Correct a category")
 
-        all_merchants = sorted([m.description for m in merchants])
-        selected_merchant = st.selectbox("Select merchant to fix", all_merchants, key="select_merchant")
-        new_category = st.selectbox("Assign correct category", CATEGORIES, key="new_category")
-        st.caption("Also remembered for this merchant on future statement uploads.")
+            all_merchants = sorted([m.description for m in merchants])
+            selected_merchant = st.selectbox("Select merchant to fix", all_merchants, key="select_merchant")
+            new_category = st.selectbox("Assign correct category", CATEGORIES, key="new_category")
+            st.caption("Also remembered for this merchant on future statement uploads.")
 
-        if st.button("Update category"):
-            db = get_db()
-            transactions_to_update = db.query(Transaction).filter_by(
-                description=selected_merchant
-            ).all()
-            for t in transactions_to_update:
-                t.category = new_category
-            db.commit()
-            db.close()
-            save_user_rule(selected_merchant, new_category)
-            st.success(f"Updated all '{selected_merchant}' transactions to '{new_category}'")
+            if st.button("Update category"):
+                db = get_db()
+                transactions_to_update = db.query(Transaction).filter_by(
+                    description=selected_merchant
+                ).all()
+                for t in transactions_to_update:
+                    t.category = new_category
+                db.commit()
+                db.close()
+                save_user_rule(selected_merchant, new_category)
+                st.success(f"Updated all '{selected_merchant}' transactions to '{new_category}'")
