@@ -20,6 +20,8 @@ class BankCsvProfile:
     amount_column: str = None
     debit_column: str = None
     credit_column: str = None
+    type_column: str = None  # optional - e.g. "DD"/"Card Payment"/"Cash Back",
+                              # useful when the description itself is redacted
 
 
 CHASE = BankCsvProfile(
@@ -38,6 +40,7 @@ SANTANDER = BankCsvProfile(
     date_format="%d/%m/%Y",
     description_column="Merchant/Description",
     amount_column="Debit/Credit",
+    type_column="Type",
 )
 
 
@@ -82,6 +85,10 @@ def parse_bank_csv(file_content, profile):
         amount_idx = header.index(profile.amount_column) if profile.amount_column else None
         debit_idx = header.index(profile.debit_column) if profile.debit_column else None
         credit_idx = header.index(profile.credit_column) if profile.credit_column else None
+        # Optional and not in required_indices below - a row missing it
+        # shouldn't be skipped, since the type is supplementary context, not
+        # something the row's validity depends on
+        type_idx = header.index(profile.type_column) if profile.type_column else None
     except ValueError:
         return []
 
@@ -115,11 +122,13 @@ def parse_bank_csv(file_content, profile):
                 continue
 
         description = html.unescape(row[desc_idx]).strip()
+        txn_type = row[type_idx].strip() if type_idx is not None and len(row) > type_idx else ''
 
         transactions.append({
             'Date': date.strftime('%d %b %Y'),
             'Description': description,
             'Amount': f"{'-' if amount < 0 else ''}£{abs(amount):,.2f}",
+            'Type': txn_type,
         })
 
     return transactions

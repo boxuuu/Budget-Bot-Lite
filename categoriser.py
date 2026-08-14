@@ -164,6 +164,25 @@ def apply_known_rules(merchant_name):
             return category
     return None
 
+# Some banks (Santander) redact a transaction's description down to mostly
+# asterisks, but still expose a "Type" column (DD/Card Payment/Cash Back/
+# etc.) separately. Type alone can't identify most categories - a Direct
+# Debit could be a mortgage, Netflix, or a gym membership - but "Cash Back"
+# is a clean exception, same reasoning as the "cash withdrawal" rule above:
+# what it was actually spent on is unknowable regardless of merchant text.
+TYPE_RULES = {
+    'cashback': 'Other',
+}
+
+def apply_type_rule(transaction_type):
+    if not transaction_type:
+        return None
+    # Strips spaces/punctuation before matching, so "Cash Back", "CASHBACK"
+    # and "Cash-back" all normalize the same way regardless of how a given
+    # bank happens to format the value
+    normalized = ''.join(ch for ch in transaction_type.lower() if ch.isalnum())
+    return TYPE_RULES.get(normalized)
+
 def get_merchant_context(merchant_name, all_transactions):
     matching = [t for t in all_transactions if t.description == merchant_name]
     if not matching:
@@ -248,16 +267,32 @@ Reply with only the category name, nothing else.
 def categorise_all(db_session, Transaction):
     all_transactions = db_session.query(Transaction).all()
     uncategorised = [t for t in all_transactions if t.category == 'Uncategorised']
-    
+
     if not uncategorised:
         return 0, 0
-    
-    unique_merchants = list(set(t.description for t in uncategorised))
+
     rules_applied = 0
     ollama_used = 0
-    
+
+    # Type-based rule first (e.g. Cash Back -> Other) - per-transaction
+    # rather than per-merchant, since it's independent of description
+    # entirely. Only ever matches on a model with a transaction_type column
+    # (HouseholdTransaction currently) - Transaction has none, so
+    # getattr(..., None) makes this a no-op there.
+    remaining = []
+    for t in uncategorised:
+        type_category = apply_type_rule(getattr(t, 'transaction_type', None))
+        if type_category:
+            t.category = type_category
+            rules_applied += 1
+            print(f"  [type rule] {t.description[:40]} -> {type_category}")
+        else:
+            remaining.append(t)
+
+    unique_merchants = list(set(t.description for t in remaining))
+
     print(f"Categorising {len(unique_merchants)} unique merchants...")
-    
+
     merchant_map = {}
     for merchant in unique_merchants:
         # A user's own past correction always wins, then the hardcoded
@@ -276,11 +311,11 @@ def categorise_all(db_session, Transaction):
             merchant_map[merchant] = category
             ollama_used += 1
             print(f"  [ollama] {merchant} -> {category}")
-    
+
     # Apply to all transactions
-    for t in uncategorised:
+    for t in remaining:
         t.category = merchant_map[t.description]
-    
+
     db_session.commit()
     return rules_applied, ollama_used
 

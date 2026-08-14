@@ -1491,9 +1491,15 @@ elif page == "View Transactions":
             st.info(empty_message)
             return
 
+        # Household transactions carry a Type column (DD/Card Payment/Cash
+        # Back/etc.) - useful context when Santander has redacted the
+        # description down to mostly asterisks. Personal has no equivalent,
+        # so this column only appears for the dataset that has it.
+        has_type = hasattr(transactions[0], 'transaction_type')
         df = pd.DataFrame([{
             'Date': t.date,
             'Description': t.description,
+            **({'Type': t.transaction_type} if has_type else {}),
             'Amount': t.amount,
             'Category': t.category,
             'Month': t.month

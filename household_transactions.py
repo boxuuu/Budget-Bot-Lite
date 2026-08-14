@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Float, Integer, DateTime
+from sqlalchemy import create_engine, Column, String, Float, Integer, DateTime, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from datetime import datetime, timedelta
 
@@ -19,6 +19,11 @@ class HouseholdTransaction(Base):
     amount = Column(Float)
     category = Column(String, default='Uncategorised')
     month = Column(String)
+    # Santander's "Type" column (DD/Card Payment/Cash Back/etc.) - useful
+    # context when the description itself is redacted to mostly asterisks,
+    # which Santander does for some transactions. Not every bank has an
+    # equivalent column, so this stays '' rather than None when absent.
+    transaction_type = Column(String, default='')
 
 class HouseholdRecurringChargeDismissal(Base):
     """Same purpose as budget.RecurringChargeDismissal, but a separate
@@ -33,9 +38,21 @@ class HouseholdRecurringChargeDismissal(Base):
 
 DISMISSAL_EXPIRY_DAYS = 180
 
+def _ensure_transaction_type_column(engine):
+    """create_all() only creates tables that don't exist yet - it won't add
+    a column to a household_transactions table that already exists from
+    before transaction_type was introduced, so a database created before
+    this shipped needs the column added by hand."""
+    with engine.connect() as conn:
+        columns = [row[1] for row in conn.execute(text("PRAGMA table_info(household_transactions)"))]
+        if 'transaction_type' not in columns:
+            conn.execute(text("ALTER TABLE household_transactions ADD COLUMN transaction_type VARCHAR DEFAULT ''"))
+            conn.commit()
+
 def get_household_transactions_db():
     engine = create_engine('sqlite:///budget_bot.db')
     Base.metadata.create_all(engine)
+    _ensure_transaction_type_column(engine)
     Session = sessionmaker(bind=engine)
     return Session()
 
@@ -67,7 +84,8 @@ def save_household_transactions(transactions):
                 date=t['Date'],
                 description=t['Description'],
                 amount=amount_to_float(t['Amount']),
-                month=month
+                month=month,
+                transaction_type=t.get('Type', '')
             ))
             saved += 1
         else:
