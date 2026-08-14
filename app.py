@@ -1407,11 +1407,18 @@ elif page == "Goals":
 # --- View Transactions Page ---
 elif page == "View Transactions":
     st.header(":material/receipt_long: All Transactions")
-    
-    all_transactions = load_all_transactions()
 
-    if all_transactions:
-        from analytics import month_sort_key
+    from household_transactions import load_all_household_transactions
+    from analytics import month_sort_key
+
+    def render_transactions_table(transactions, key_prefix, empty_message):
+        """Shared by the Personal and Household tabs below - identical
+        filters/table for either dataset, kept as two separate calls (never
+        a merged DataFrame) so the two account's transactions are never
+        combined, only displayed side by side."""
+        if not transactions:
+            st.info(empty_message)
+            return
 
         df = pd.DataFrame([{
             'Date': t.date,
@@ -1419,19 +1426,25 @@ elif page == "View Transactions":
             'Amount': t.amount,
             'Category': t.category,
             'Month': t.month
-        } for t in all_transactions])
+        } for t in transactions])
 
-        with st.container(border=True, key="card_transactions_filters"):
+        with st.container(border=True, key=f"card_{key_prefix}_filters"):
             col1, col2, col3 = st.columns(3)
             with col1:
                 months = sorted(df['Month'].unique().tolist(), key=month_sort_key)
-                selected_month = st.selectbox("Filter by month", ["All months"] + months)
+                selected_month = st.selectbox(
+                    "Filter by month", ["All months"] + months, key=f"{key_prefix}_month_filter"
+                )
             with col2:
                 merchants = sorted(df['Description'].unique().tolist())
-                selected_merchant = st.selectbox("Filter by merchant", ["All merchants"] + merchants)
+                selected_merchant = st.selectbox(
+                    "Filter by merchant", ["All merchants"] + merchants, key=f"{key_prefix}_merchant_filter"
+                )
             with col3:
                 categories = sorted(df['Category'].unique().tolist())
-                selected_category = st.selectbox("Filter by category", ["All categories"] + categories)
+                selected_category = st.selectbox(
+                    "Filter by category", ["All categories"] + categories, key=f"{key_prefix}_category_filter"
+                )
 
         if selected_month != "All months":
             df = df[df['Month'] == selected_month]
@@ -1440,11 +1453,21 @@ elif page == "View Transactions":
         if selected_category != "All categories":
             df = df[df['Category'] == selected_category]
 
-        with st.container(border=True, key="card_transactions_table"):
+        with st.container(border=True, key=f"card_{key_prefix}_table"):
             st.dataframe(df, use_container_width=True)
             st.caption(f"Showing {len(df)} transactions")
-    else:
-        st.info("No transactions yet - upload a statement first")
+
+    tab_personal, tab_household = st.tabs(["Personal", "Household"])
+
+    with tab_personal:
+        render_transactions_table(
+            load_all_transactions(), "txn_personal", "No transactions yet - upload a statement first"
+        )
+
+    with tab_household:
+        render_transactions_table(
+            load_all_household_transactions(), "txn_household", "No transactions yet - upload a statement first"
+        )
 
 # --- Manage Categories Page ---
 elif page == "Manage Categories":
