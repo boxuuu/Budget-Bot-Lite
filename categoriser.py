@@ -119,6 +119,10 @@ KNOWN_RULES = {
     "aviva": "Insurance & Finance",
     "homeprotect": "Insurance & Finance",
     "surewise": "Insurance & Finance",
+    "zurich": "Insurance & Finance",
+    "tsb": "Insurance & Finance",
+    "tv licence": "Bills & Utilities",
+    "brsk": "Phone & Internet",
     "house acc": "Rent & Housing",
     # Household (Santander) account rules - map directly to existing
     # Household Bills line items (Energy: Octopus, Mortgage: Nationwide,
