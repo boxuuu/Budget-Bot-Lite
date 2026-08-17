@@ -1,5 +1,44 @@
 from collections import defaultdict
 from datetime import datetime
+from sqlalchemy import create_engine, Column, String
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+Base = declarative_base()
+
+class SavingsBufferMerchant(Base):
+    """A user-tagged merchant within the Savings & Investments category that
+    behaves as a discretionary spending buffer rather than genuine savings -
+    the data-driven equivalent of the private build's hardcoded "Fun Money"
+    exclusion below, built from whatever a user's own transactions actually
+    contain rather than one fixed name. Excluded entirely from the Savings
+    Rate/trend-line calculation in both directions, same treatment as
+    EXCLUDED_FROM_SAVINGS. Toggled from the Dashboard."""
+    __tablename__ = 'savings_buffer_merchants'
+
+    merchant = Column(String, primary_key=True)  # lowercased, exact match
+
+def get_analytics_db():
+    engine = create_engine('sqlite:///budget_bot.db')
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    return Session()
+
+def get_savings_buffer_merchants():
+    db = get_analytics_db()
+    merchants = {m.merchant for m in db.query(SavingsBufferMerchant).all()}
+    db.close()
+    return merchants
+
+def set_savings_buffer_merchant(merchant_name, is_buffer):
+    db = get_analytics_db()
+    key = merchant_name.lower()
+    existing = db.query(SavingsBufferMerchant).filter_by(merchant=key).first()
+    if is_buffer and not existing:
+        db.add(SavingsBufferMerchant(merchant=key))
+    elif not is_buffer and existing:
+        db.delete(existing)
+    db.commit()
+    db.close()
 
 def month_sort_key(month_label):
     """Transaction.month is a string like 'Apr 2026' - sorting it directly
@@ -45,7 +84,9 @@ EXCLUDED_FROM_SAVINGS = ['fun money']
 def is_savings_transfer(description):
     return any(pot in description.lower() for pot in SAVINGS_POT_NAMES)
 
-def is_excluded_from_savings(description):
+def is_excluded_from_savings(description, buffer_merchants=None):
+    if buffer_merchants and description.lower() in buffer_merchants:
+        return True
     return any(name in description.lower() for name in EXCLUDED_FROM_SAVINGS)
 
 def format_gbp(amount, decimals=2):
@@ -53,14 +94,15 @@ def format_gbp(amount, decimals=2):
     needed since Savings & Investments figures can be net-negative."""
     return f"-£{abs(amount):,.{decimals}f}" if amount < 0 else f"£{amount:,.{decimals}f}"
 
-def net_spend_amount(amount, description):
+def net_spend_amount(amount, description, buffer_merchants=None):
     """How much a transaction contributes to a spend/category total: 0 for
-    anything matching EXCLUDED_FROM_SAVINGS (Fun Money, see above); the
-    full amount for a real outflow; for money returning from one of
-    Jonathan's named savings pots (positive amount, matches a pot name) it
-    nets NEGATIVELY, since it's money he already owned coming back, not new
+    anything matching EXCLUDED_FROM_SAVINGS or a user-tagged
+    SavingsBufferMerchant (buffer_merchants, see is_excluded_from_savings);
+    the full amount for a real outflow; for money returning from a named
+    savings pot (positive amount, matches SAVINGS_POT_NAMES) it nets
+    NEGATIVELY, since it's money already owned coming back, not new
     spending or income. Everything else contributes 0."""
-    if is_excluded_from_savings(description):
+    if is_excluded_from_savings(description, buffer_merchants):
         return 0
     if amount < 0:
         return abs(amount)
@@ -70,23 +112,24 @@ def net_spend_amount(amount, description):
 
 def calculate_savings_rate(transactions):
     """Computes salary/savings-rate figures from a list of Transaction
-    objects. Salary is identified via "From B E" transactions (confirmed as
-    Jonathan's salary); one month per year typically includes his annual
-    bonus, so the median across months (robust to that outlier) is used as
-    the typical monthly figure. Savings is the "Savings & Investments"
-    category, netted via net_spend_amount() so money moving back out of a
-    named savings pot reduces the figure rather than being invisible - this
-    can legitimately make a month's (or the overall) savings figure negative
-    when withdrawals outweigh contributions.
+    objects. Salary is identified via "From B E" transactions; one month
+    per year typically includes an annual bonus, so the median across
+    months (robust to that outlier) is used as the typical monthly figure.
+    Savings is the "Savings & Investments" category, netted via
+    net_spend_amount() so money moving back out of a named savings pot
+    reduces the figure rather than being invisible - this can legitimately
+    make a month's (or the overall) savings figure negative when
+    withdrawals outweigh contributions.
 
     Returns a dict: income_by_month, bonus_month, typical_monthly_income,
     savings_by_month, avg_savings, min_savings, max_savings, savings_rate.
     All numeric values are 0 and dicts empty if there's no spending data."""
+    buffer_merchants = get_savings_buffer_merchants()
     by_month_category = defaultdict(lambda: defaultdict(float))
     income_by_month = defaultdict(float)
 
     for t in transactions:
-        net = net_spend_amount(t.amount, t.description)
+        net = net_spend_amount(t.amount, t.description, buffer_merchants)
         if net:
             by_month_category[t.month][t.category] += net
         if t.amount > 0 and t.description.lower().startswith('from b e'):

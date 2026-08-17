@@ -161,7 +161,10 @@ if page == "Dashboard":
     else:
         import plotly.express as px
         from datetime import datetime, timedelta
-        from analytics import month_sort_key, calculate_savings_rate, format_gbp
+        from analytics import (
+            month_sort_key, calculate_savings_rate, format_gbp,
+            get_savings_buffer_merchants, set_savings_buffer_merchant
+        )
         from networth import get_total_net_worth_series
 
         df = pd.DataFrame([{
@@ -452,12 +455,79 @@ if page == "Dashboard":
                 )
                 st.plotly_chart(fig_trend, use_container_width=True)
 
+            with st.expander("Manage spending-buffer merchants"):
+                st.caption(
+                    "If a Savings & Investments merchant below is really a discretionary "
+                    "spending buffer rather than genuine savings (money moves in and back out "
+                    "again for actual spending, not long-term saving), tag it here to exclude "
+                    "it entirely from the Savings Rate KPI and the Savings line above."
+                )
+                savings_merchant_names = sorted(set(
+                    t.description for t in all_transactions if t.category == 'Savings & Investments'
+                ))
+                if not savings_merchant_names:
+                    st.caption("No Savings & Investments merchants yet.")
+                else:
+                    current_buffer_merchants = get_savings_buffer_merchants()
+                    for merchant in savings_merchant_names:
+                        was_buffer = merchant.lower() in current_buffer_merchants
+                        is_buffer = st.checkbox(
+                            merchant, value=was_buffer, key=f"buffer_toggle_{merchant}"
+                        )
+                        if is_buffer != was_buffer:
+                            set_savings_buffer_merchant(merchant, is_buffer)
+                            st.rerun()
+
 # --- Upload Statement Page ---
 elif page == "Upload Statement":
     st.header(":material/upload_file: Upload Statement")
 
-    from household_transactions import save_household_transactions
+    from household_transactions import save_household_transactions, get_household_transactions_db, HouseholdTransaction
     from csv_import import parse_bank_csv, decode_csv_bytes, CHASE, SANTANDER
+    from categoriser import CATEGORIES, save_user_rule
+
+    def render_uncategorised_review(TransactionModel, get_db_func, key_prefix, max_shown=10):
+        """Shown after a save (and any other time there's a backlog) so a
+        new user isn't left to discover Manage Categories on their own -
+        the biggest-impact unmatched merchants surface right where they
+        just uploaded, with a one-click fix that persists via
+        save_user_rule() same as Manage Categories."""
+        db = get_db_func()
+        uncategorised = db.query(TransactionModel).filter_by(category='Uncategorised').all()
+        db.close()
+
+        if not uncategorised:
+            return
+
+        impact = {}
+        for t in uncategorised:
+            impact[t.description] = impact.get(t.description, 0) + abs(t.amount)
+        top_merchants = sorted(impact.items(), key=lambda x: x[1], reverse=True)[:max_shown]
+
+        with st.container(border=True, key=f"card_{key_prefix}_review"):
+            st.subheader("Still need a category")
+            st.caption(
+                f"Top {len(top_merchants)} of {len(impact)} uncategorised merchants by amount - "
+                "assign one to knock these out quickly. A save here sticks for future statements "
+                "too. The rest can be fixed anytime on Manage Categories."
+            )
+            for merchant, total in top_merchants:
+                cols = st.columns([3.2, 1.3, 1.8, 1])
+                cols[0].write(merchant)
+                cols[1].write(f"£{total:,.2f}")
+                chosen_category = cols[2].selectbox(
+                    "Category", CATEGORIES, key=f"{key_prefix}_review_cat_{merchant}",
+                    label_visibility="collapsed"
+                )
+                if cols[3].button("Save", key=f"{key_prefix}_review_save_{merchant}", use_container_width=True):
+                    db = get_db_func()
+                    rows = db.query(TransactionModel).filter_by(description=merchant).all()
+                    for r in rows:
+                        r.category = chosen_category
+                    db.commit()
+                    db.close()
+                    save_user_rule(merchant, chosen_category)
+                    st.rerun()
 
     col_personal, col_household = st.columns(2)
 
@@ -478,7 +548,13 @@ elif page == "Upload Statement":
 
                 if st.button("Save to Budget Bot", key="save_personal_statement"):
                     saved, skipped = save_transactions(transactions)
-                    st.success(f"Saved {saved} new transactions. Skipped {skipped} duplicates.")
+                    db = get_db()
+                    rules, still_uncategorised = categorise_all(db, Transaction)
+                    db.close()
+                    st.success(
+                        f"Saved {saved} new transactions ({skipped} duplicates skipped). "
+                        f"{rules} categorised automatically, {still_uncategorised} still need one."
+                    )
             else:
                 st.warning(
                     "No transactions found. Make sure this is the CSV export from Chase's "
@@ -505,12 +581,21 @@ elif page == "Upload Statement":
 
                 if st.button("Save to Household Budget", key="save_household_statement"):
                     saved, skipped = save_household_transactions(parsed_household_transactions)
-                    st.success(f"Saved {saved} new transactions. Skipped {skipped} duplicates.")
+                    hdb = get_household_transactions_db()
+                    rules, still_uncategorised = categorise_all(hdb, HouseholdTransaction)
+                    hdb.close()
+                    st.success(
+                        f"Saved {saved} new transactions ({skipped} duplicates skipped). "
+                        f"{rules} categorised automatically, {still_uncategorised} still need one."
+                    )
             else:
                 st.warning(
                     "No transactions found. Make sure this is the CSV export from Santander's "
                     "\"midata\" transactions download, not a different file."
                 )
+
+    render_uncategorised_review(Transaction, get_db, "upload_review_personal")
+    render_uncategorised_review(HouseholdTransaction, get_household_transactions_db, "upload_review_household")
 
     from household_transactions import get_household_months
     from analytics import get_upload_checklist
