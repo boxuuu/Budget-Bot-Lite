@@ -66,9 +66,9 @@ them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net
    expire after 6 months rather than hiding a merchant forever)
 4. **Household Budget** — live-editable bills grid (service, provider, renewal date, amount) with a
    computed total and an editable % split between two editable-name household members (no names
-   hardcoded in the UI), the same Actual-spend/Recurring-Charges pattern as Personal Budget but
-   sourced from the separate Santander `HouseholdTransaction` table, and a "Categorise uncategorised
-   household transactions" button
+   hardcoded in the UI), and the same Actual-spend/Recurring-Charges pattern as Personal Budget but
+   sourced from the separate Santander `HouseholdTransaction` table. Categorisation itself (bulk +
+   manual correction) lives on the Manage Categories page's Household tab, not here
 5. **Goals** — a Savings Goal and a Discretionary Spend Ceiling, each with a streak (consecutive
    complete months hit), a "so far this month" progress figure, and a "Set a new target" form
    pre-filled with a suggested value from recent history. A new target only ever takes effect next
@@ -79,7 +79,9 @@ them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net
    (see Tech stack/Project structure above) rather than a bank-specific parser
 7. **View Transactions** — full transaction table with month, merchant, and category filters and
    categorisation buttons (personal Chase transactions only)
-8. **Manage Categories** — review and correct merchant categories (personal Chase transactions only)
+8. **Manage Categories** — Personal/Household tabs (same pattern as View Transactions), each with its
+   own bulk categorise/re-categorise actions, merchant table, and "Correct a category" form - a
+   correction always persists via `CategoryRule`, regardless of which tab it's made from
 
 There is no standalone Chat page — the chat interface (natural language questions, category
 fixes, and net worth updates, with a Confirm/Cancel click required before writing to the database)
