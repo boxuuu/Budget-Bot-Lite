@@ -1177,7 +1177,7 @@ elif page == "Household Budget":
         undismiss_household_recurring_charge
     )
     from analytics import calculate_avg_monthly_spend, get_recurring_charges
-    from categoriser import CATEGORIES
+    from categoriser import CATEGORIES, save_user_rule
 
     with st.container(border=True, key="card_household_categorise"):
         st.caption("Upload Santander statements on the Upload Statement page.")
@@ -1187,6 +1187,60 @@ elif page == "Household Budget":
                 rules, still_uncategorised = categorise_all(hdb, HouseholdTransaction)
                 hdb.close()
                 st.success(f"Done. {rules} categorised by rules, {still_uncategorised} left for manual review")
+
+    hdb = get_household_transactions_db()
+    household_merchants = hdb.query(
+        HouseholdTransaction.description, HouseholdTransaction.category
+    ).distinct(HouseholdTransaction.description).all()
+    hdb.close()
+
+    if household_merchants:
+        with st.container(border=True, key="card_household_manage_categories"):
+            st.subheader("Manage Categories")
+            st.caption(
+                "Santander sometimes redacts a transaction's description down to mostly "
+                "asterisks - no automatic rule can identify those, so they need a one-off "
+                "manual fix here. It's then remembered for future statements."
+            )
+
+            household_merchant_df = pd.DataFrame([{
+                'Merchant': m.description,
+                'Category': m.category
+            } for m in household_merchants]).sort_values('Merchant')
+
+            household_manage_cat_filter = st.selectbox(
+                "Filter by category", ["All categories"] + CATEGORIES, key="household_manage_category_filter"
+            )
+            if household_manage_cat_filter != "All categories":
+                household_merchant_df = household_merchant_df[
+                    household_merchant_df['Category'] == household_manage_cat_filter
+                ]
+
+            st.dataframe(household_merchant_df, use_container_width=True, hide_index=True)
+
+            st.divider()
+
+            all_household_merchant_names = sorted([m.description for m in household_merchants])
+            household_selected_merchant = st.selectbox(
+                "Select merchant to fix", all_household_merchant_names, key="household_select_merchant"
+            )
+            household_new_category = st.selectbox(
+                "Assign correct category", CATEGORIES, key="household_new_category"
+            )
+            st.caption("Also remembered for this merchant on future statement uploads.")
+
+            if st.button("Update category", key="household_update_category_btn"):
+                hdb = get_household_transactions_db()
+                to_update = hdb.query(HouseholdTransaction).filter_by(
+                    description=household_selected_merchant
+                ).all()
+                for t in to_update:
+                    t.category = household_new_category
+                hdb.commit()
+                hdb.close()
+                save_user_rule(household_selected_merchant, household_new_category)
+                st.success(f"Updated all '{household_selected_merchant}' transactions to '{household_new_category}'")
+                st.rerun()
 
     household_transactions_data = load_all_household_transactions()
 

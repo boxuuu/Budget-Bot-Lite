@@ -116,6 +116,10 @@ KNOWN_RULES = {
     "aviva": "Insurance & Finance",
     "homeprotect": "Insurance & Finance",
     "surewise": "Insurance & Finance",
+    "zurich": "Insurance & Finance",
+    "tsb": "Insurance & Finance",
+    "tv licence": "Bills & Utilities",
+    "brsk": "Phone & Internet",
     # Common UK household bill providers
     "octopus": "Bills & Utilities",
     "nationwide b s": "Rent & Housing",
