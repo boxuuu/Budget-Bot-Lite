@@ -80,8 +80,10 @@ them using Ollama (Llama 3.2), and displays spending analysis, charts, and a net
 7. **View Transactions** — full transaction table with month, merchant, and category filters and
    categorisation buttons (personal Chase transactions only)
 8. **Manage Categories** — Personal/Household tabs (same pattern as View Transactions), each with its
-   own bulk categorise/re-categorise actions, merchant table, and "Correct a category" form - a
-   correction always persists via `CategoryRule`, regardless of which tab it's made from
+   own bulk categorise/re-categorise actions and a merchant table whose Category column is directly
+   editable (a dropdown per row via `st.data_editor`), with a "Save changes" button that applies every
+   edited row at once - a correction always persists via `CategoryRule`, regardless of which tab it's
+   made from
 
 There is no standalone Chat page — the chat interface (natural language questions, category
 fixes, and net worth updates, with a Confirm/Cancel click required before writing to the database)
@@ -102,7 +104,7 @@ for scrollable message history.
 
 ### CategoryRule (categoriser.py)
 - merchant (String, primary key, lowercased exact match), category (String)
-- Created/overwritten automatically whenever "Update category" is used on the Manage Categories
+- Created/overwritten automatically whenever a category edit is saved on the Manage Categories
   page, so a manual correction survives future statement uploads and full re-categorisations
   instead of resetting to `Uncategorised` every time. Checked before `KNOWN_RULES`, so a human
   correction always wins over both the hardcoded rules and Ollama. Shared across

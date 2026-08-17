@@ -1587,9 +1587,9 @@ elif page == "Manage Categories":
             merchant_df = pd.DataFrame([{
                 'Merchant': m.description,
                 'Category': m.category
-            } for m in merchants]).sort_values('Merchant')
+            } for m in merchants]).sort_values('Merchant').reset_index(drop=True)
 
-            st.caption(f"{len(merchant_df)} unique merchants")
+            st.caption(f"{len(merchant_df)} unique merchants - edit Category directly and Save changes below")
 
             categories_present = sorted(merchant_df['Category'].unique().tolist())
             selected_cat = st.selectbox(
@@ -1598,35 +1598,39 @@ elif page == "Manage Categories":
                 key=f"{key_prefix}_filter_category"
             )
 
-            if selected_cat != "All categories":
-                merchant_df = merchant_df[merchant_df['Category'] == selected_cat]
-
-            st.dataframe(merchant_df, use_container_width=True)
-
-        with st.container(border=True, key=f"card_{key_prefix}_correct_category"):
-            st.subheader("Correct a category")
-
-            all_merchants = sorted([m.description for m in merchants])
-            selected_merchant = st.selectbox(
-                "Select merchant to fix", all_merchants, key=f"{key_prefix}_select_merchant"
+            display_df = (
+                merchant_df if selected_cat == "All categories"
+                else merchant_df[merchant_df['Category'] == selected_cat]
             )
-            new_category = st.selectbox(
-                "Assign correct category", CATEGORIES, key=f"{key_prefix}_new_category"
-            )
-            st.caption("Also remembered for this merchant on future statement uploads.")
 
-            if st.button("Update category", key=f"{key_prefix}_update_category_btn"):
-                db = get_db_func()
-                transactions_to_update = db.query(TransactionModel).filter_by(
-                    description=selected_merchant
-                ).all()
-                for t in transactions_to_update:
-                    t.category = new_category
-                db.commit()
-                db.close()
-                save_user_rule(selected_merchant, new_category)
-                st.success(f"Updated all '{selected_merchant}' transactions to '{new_category}'")
-                st.rerun()
+            edited_df = st.data_editor(
+                display_df,
+                column_config={
+                    'Category': st.column_config.SelectboxColumn(options=CATEGORIES, required=True)
+                },
+                disabled=['Merchant'],
+                hide_index=True,
+                use_container_width=True,
+                key=f"{key_prefix}_editor"
+            )
+
+            if st.button("Save changes", key=f"{key_prefix}_save_changes_btn"):
+                changed_rows = edited_df[edited_df['Category'] != display_df['Category']]
+                if changed_rows.empty:
+                    st.info("No changes to save.")
+                else:
+                    db = get_db_func()
+                    for _, row in changed_rows.iterrows():
+                        transactions_to_update = db.query(TransactionModel).filter_by(
+                            description=row['Merchant']
+                        ).all()
+                        for t in transactions_to_update:
+                            t.category = row['Category']
+                        save_user_rule(row['Merchant'], row['Category'])
+                    db.commit()
+                    db.close()
+                    st.success(f"Updated {len(changed_rows)} merchant(s). Also remembered for future statement uploads.")
+                    st.rerun()
 
     tab_personal, tab_household = st.tabs(["Personal", "Household"])
 
