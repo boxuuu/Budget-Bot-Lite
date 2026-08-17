@@ -167,20 +167,13 @@ Ideas raised in conversation, not committed to any stage yet. Resurface these if
    diversification/risk exposure entirely.
 5. **Backup/export** — a one-click CSV/DB export. `budget_bot.db` is flagged "do not delete" in
    CLAUDE.md but has no backup story; it's a single local file holding years of net worth history.
-6. **Share Budget Bot with friends (Mac + Windows)** — assessed 2026-08-12, not committed to. Each
-   friend would run their own local copy (own SQLite file, own optional Ollama) rather than one
-   hosted instance, distributed via GitHub + setup instructions rather than a native installer, with
-   AI features (chat, smart categorisation) becoming optional rather than required. Real work
-   identified: strip personal identity out of LLM-facing prompts (`chat.py`/`categoriser.py` hardcode
-   "Jonathan"/"Manchester"); replace the hardcoded `analytics.SAVINGS_POT_NAMES`/
-   `EXCLUDED_FROM_SAVINGS` with a real per-user Settings UI; add a persisted `CategoryRule` table so
-   corrections on Manage Categories actually teach the app instead of only fixing one transaction;
-   make the Ollama fallback degrade gracefully (currently has no error handling — an absent Ollama
-   install would break the upload flow, not just skip AI features); and — the biggest lever — a
-   bank-agnostic CSV import path, since the PDF parsers only ever work for the exact bank they were
-   built against. Total estimate: roughly 1-2 weeks of focused work, most of it optional/incremental
-   rather than a single all-or-nothing rewrite. The CSV import piece was pulled forward and started
-   immediately (see Session Log) since Jonathan realized both his own banks offer CSV exports.
+6. ~~**Share Budget Bot with friends (Mac + Windows)**~~ — **built 2026-08-17**, as a genuine fork
+   rather than in-app optional AI toggles (GitHub can't fork a private personal repo, so this repo's
+   `main` gained a local `lite` branch pushed to a separate public repo, `boxuuu/Budget-Bot-Lite`).
+   Persisted `CategoryRule` table and bank-agnostic CSV import (both originally scoped here) are done
+   and shared by both repos. See the 2026-08-17 Session Log entries for the full breakdown - the one
+   piece of the original scope NOT done is a per-user Settings UI for `SAVINGS_POT_NAMES`; only the
+   `EXCLUDED_FROM_SAVINGS`/"Fun Money" half became user-configurable (`SavingsBufferMerchant`).
 
 ### Recurring charges checklist, built (2026-07-16)
 Jonathan's real concern turned out to be narrower and more actionable than a full subscription audit:
@@ -210,7 +203,9 @@ concrete win (Dashboard trend chart split into Spending vs Savings lines) and on
 parked decision (budget targets vs actuals — Jonathan is happy with raw data access instead, see
 Known Issues). Outside the original 8 stages: the recurring-charges checklist (Suggested Features
 above) is built for both Personal and Household Budget, and the app now supports two separate bank
-accounts (Chase personal, Santander household) with fully isolated data.
+accounts (Chase personal, Santander household) with fully isolated data. As of 2026-08-17, Budget
+Bot Lite (public fork for friends, no AI) also exists and is past its first real testing pass — see
+Session Log for the full build-and-fix history.
 
 ## 8. Known Issues
 
@@ -241,14 +236,10 @@ accounts (Chase personal, Santander household) with fully isolated data.
   exports via `csv_import.py`'s single profile-driven `parse_bank_csv()` engine instead of two
   bank-specific PDF parsers. A new bank is a new `BankCsvProfile`, not new parsing code — see
   `csv_import.py` and the Session Log entry below.
-- **No manual category-correction UI for household transactions yet**: Chase transactions have the
-  Manage Categories page (browse, filter, manually correct); household Santander transactions only
-  have the "Categorise uncategorised household transactions" button on the Household Budget page —
-  no equivalent browse/correct page. A few of Jonathan's real household transactions came back
-  miscategorised after the first real upload (2026-07-20) — e.g. "DREAMS LTD" (a bed/mattress
-  retailer, matches the "Mattress" Household Bills item) landed in "Other", "BLINDS 2GO" landed in
-  "Subscriptions" instead of "Shopping" — normal Ollama imperfection, same as Chase's, but there's
-  currently no page to fix it from. Worth building if this comes up as a recurring annoyance.
+- ~~**No manual category-correction UI for household transactions yet**~~ — **superseded
+  2026-08-17**: Manage Categories now has Personal/Household tabs, both with the same bulk actions
+  and directly-editable merchant table (see Session Log). Household transactions can be corrected
+  the same way Chase ones always could.
 - **Savings & Investments netting scope**: applies to the Savings Rate KPI, Chat's context, and the
   Dashboard trend chart's "Savings & Investments" line — but deliberately *not* to the Dashboard's
   other general spending views (Total Spent, pie chart, top merchants), which stay gross/unmodified
@@ -267,16 +258,28 @@ accounts (Chase personal, Santander household) with fully isolated data.
   having access to the raw data and making his own calls rather than the app formally comparing
   budget vs actual. Don't build Stage 8's original goal unprompted — only the subscription-audit
   angle (Suggested Features above) is currently active.
+- **Budget Bot Lite exists as a second repo, tracked from this same working directory**: a public
+  fork for friends, `boxuuu/Budget-Bot-Lite`, built 2026-08-17 (see Session Log). This local
+  `~/budget-bot` checkout carries both branches — `main` (this private repo, pushes to `origin`) and
+  `lite` (pushes to a separate `lite` remote). A non-AI fix belongs on `main` first, then
+  `git merge main` into `lite`; AI-specific or lite-only wording changes go on `lite` only. A
+  standing `~/budget-bot-lite` clone exists purely for manual browser testing (`git pull` to refresh
+  it) — it is not itself a git remote and has no bearing on either branch's history.
+- **Lite's savings-pot netting is still hardcoded to Jonathan's own pot names, unlike the buffer
+  exclusion**: `analytics.SAVINGS_POT_NAMES` (Round up/Emergency Fund/Wedding/Overflow) and the
+  salary detection (`"From B E"` in `calculate_savings_rate`) were left untouched 2026-08-17 while
+  `EXCLUDED_FROM_SAVINGS`/"Fun Money" became the configurable `SavingsBufferMerchant` mechanism —
+  for a friend on lite whose bank doesn't share those exact strings, the Savings Rate KPI just shows
+  N/A and pot-withdrawal netting silently never fires. Not broken, just inert. Worth making
+  configurable the same way if it comes up as a recurring annoyance for an actual friend.
 
 ## 9. Next Actions
 
-1. Nothing currently blocking. Dashboard filters, Net Worth growth column, Savings Rate/Fun Money
-   fix, and Household Budget's Santander support are all built and verified against real data.
-   Resurface the four remaining Suggested Features ideas (§6) if Jonathan asks what's on the plan —
-   none are committed to yet.
-2. *(Only if it becomes a recurring annoyance)* Build a Manage Categories equivalent for household
-   transactions — currently only a "Categorise uncategorised" button, no way to browse/manually
-   correct like Chase transactions can.
+1. Nothing currently blocking on `main`. Keep testing Budget Bot Lite as real friend usage surfaces
+   issues (same pattern as 2026-08-17's fresh-install/real-data testing pass) — most likely next
+   findings are more first-run rough edges, same category as what got fixed this session.
+2. *(Only if it comes up for an actual friend)* Make `SAVINGS_POT_NAMES`/salary detection
+   user-configurable on lite, same approach as the `SavingsBufferMerchant` toggle — see Known Issues.
 3. *(Low priority, only if it comes up)* If Jonathan starts using per-pension projections regularly,
    revisit the Mar 2025 pension-transfer distortion noted in Known Issues — would need a way to tag a
    specific asset-value change as "transfer" so it's excluded from that asset's growth rate.
@@ -817,6 +820,118 @@ to the friends-sharing effort. Doesn't mean stripping personal specifics that ar
 (the `CHASE`/`SANTANDER` profiles, `chat.py`'s Jonathan-specific system prompt, `analytics.py`'s
 named savings pots, etc. all still need Jonathan's real setup to function correctly today) - see the
 "Share Budget Bot with friends" assessment (§6) for the fuller list of what that would actually take.
+
+### 2026-08-17 — Budget Bot Lite: forked and stripped of AI
+Jonathan asked how to actually create a downloadable version for friends, having previously only
+assessed it (2026-08-12, §6). GitHub won't let a personal private repo be forked at all, so instead
+of a real fork this repo's `main` gained a local `lite` branch, pushed to a new separate public repo,
+`boxuuu/Budget-Bot-Lite`. This local `~/budget-bot` checkout now carries both branches side by side:
+`main` pushes to the existing private `origin` remote as always, `lite` pushes to a new `lite`
+remote. The working convention established and used all session: a fix that isn't AI-specific goes
+on `main` first, then `git merge main` into `lite` to carry it across; AI-removal or lite-only wording
+changes go directly on `lite`.
+
+Stripped from `lite`: the Chat sidebar and `chat.py` entirely (unlike categorisation, it has no
+non-AI fallback - it just doesn't exist here); the Ollama/web-search fallback tier in
+`categoriser.py` (`categorise_all` is now rules-only - anything no rule matches stays `Uncategorised`
+for a manual fix instead of an AI guess); `ollama`/`ddgs`/`primp` from `requirements.txt`;
+personal-only `KNOWN_RULES` entries (a salary reference string, a specific plumber/council, an
+account nickname - generic UK-wide brand rules were kept); `PLAN.md` entirely (this file - a personal
+session log with no value to a friend); and `CLAUDE.md`'s remaining personal specifics (name,
+location, hardware, real asset list), while keeping the file itself since it's genuinely useful for
+anyone using an AI coding assistant on their own fork later.
+
+New on **both** branches: a `CategoryRule` table (`categoriser.py`) that persists automatically
+whenever a category is corrected, so a fix survives future statement uploads and full
+re-categorisations instead of resetting every time - checked before `KNOWN_RULES` and (on `main`)
+before Ollama, so a human correction always wins. This was the persisted-rules piece originally
+scoped in the 2026-08-12 friends-sharing assessment (§6).
+
+Verified via a fresh clone + fresh venv + `pip install` (simulating exactly what a friend's first
+run looks like) and Streamlit's `AppTest` framework scripting through every page - `main` and `lite`
+both boot clean with no import errors.
+
+### 2026-08-17 (continued) — First real testing pass surfaces a string of first-run bugs
+Testing `lite` end-to-end (not just "does it boot") surfaced several bugs that only show up on a
+genuinely fresh install or with real bank data - none were caused by the AI removal itself, but
+Jonathan's own long-running `main` instance never has zero data or a Windows-1252-encoded export, so
+none had been hit before. Fixed on **both** branches (all found via `AppTest` scripting through
+real/copied data, not just visual inspection):
+- Manage Categories crashed outright on a completely empty database - `pd.DataFrame([]).sort_values`
+  has no columns to sort on.
+- Net Worth's manual "Add or Remove an Asset" tile already existed in the code but only rendered once
+  at least one asset existed - a brand new user had no way in except a Worth It import, which almost
+  nobody else will have.
+- `start.sh` was hardcoded to `cd ~/budget-bot` regardless of where it was actually run from - running
+  it from `~/budget-bot-lite` silently launched the *private* app instead (hit this personally: ran
+  it from the lite clone, got confused why "lite" showed the Chat sidebar - it was actually launching
+  `main`). Fixed with `cd "$(dirname "$0")"`.
+- CSV upload crashed with `UnicodeDecodeError` on a real Santander export - Windows-1252 encodes £ as
+  a single byte (0xA3) that isn't valid UTF-8 alone. Added `csv_import.decode_csv_bytes()` (tries
+  utf-8-sig, then cp1252, then latin-1 as a guaranteed-to-succeed last resort).
+- Santander redacts many transaction descriptions down to mostly asterisks, but still exposes a
+  `Type` column (DD/Card Payment/Cash Back/etc.) separately - captured it (`BankCsvProfile` gained an
+  optional `type_column`, `HouseholdTransaction` a `transaction_type` field with a PRAGMA-based
+  migration for the already-existing table) and added a `Cash Back -> Other` rule (same reasoning as
+  the existing `cash withdrawal -> Other` rule: unknowable regardless of merchant text). Also
+  surfaced Type as a display column on View Transactions' Household tab for manual-correction context
+  on everything Type alone can't resolve.
+- Household transactions had **no** manual category-correction path at all - only a bulk "Categorise
+  uncategorised" button, no browse/correct page like Chase always had. This is the exact gap flagged
+  in Known Issues on 2026-07-20 and finally fixed here - see the next entry for where it ended up.
+
+### 2026-08-17 (continued) — Manage Categories consolidated across both accounts, made bulk-editable
+Went through a few iterations same session, each prompted by a follow-up ask:
+1. Added a household category-management block directly to Household Budget (bulk button + merchant
+   table + one-at-a-time correction form, mirroring Personal's old Manage Categories layout).
+2. Moved it instead: Manage Categories now has Personal/Household tabs (same pattern as the new View
+   Transactions tabs, added earlier the same session), each built from one shared
+   `render_manage_categories()` function. Household Budget went back to just bills/split/actual-
+   spend/recurring-charges, matching Personal Budget's scope - all categorisation lives in one place.
+   Household picked up parity it never had (a "Re-categorise everything" button) as a side effect of
+   sharing the function.
+3. Both Recurring Charges filters and Manage Categories' own filter used a static category list that
+   never included "Uncategorised" as an option - switched all three to derive their options from
+   what's actually present in the data (same approach View Transactions' filter already used
+   correctly), so "Uncategorised" (or anything else real) shows up whenever it's actually there.
+4. Final iteration: replaced the separate "select merchant / select category / click Update" form
+   with a directly-editable Category column on the merchant table itself (`st.data_editor` +
+   `SelectboxColumn`, Merchant locked) and one "Save changes" button that diffs the edited table
+   against the original and applies every changed row at once - several corrections in one save
+   instead of one at a time.
+
+All of the above shipped on both `main` and `lite`. Testing note: Streamlit's `AppTest` framework
+(used throughout this session to script through pages/widgets without a browser) does not support
+`data_editor` interactions at all - it's missing from its widget API entirely. Verified step 4's
+actual logic a different way instead: replicated the exact diff/update code standalone against
+copied real data (never the live database), confirming pandas index alignment correctly isolates
+only the edited row even after filtering, and that the save path (DB update + `CategoryRule`
+persistence) works end to end. Full 8-page `AppTest` sweep still covers everything else on the page.
+
+### 2026-08-17 (continued) — Lite-only: first-run experience and a data-driven savings-buffer toggle
+Two gaps specific to a brand new `lite` user, raised by Jonathan after testing uploads himself:
+- The Dashboard's Savings Rate KPI tooltip and trend chart caption both named Jonathan's specific
+  pots (Emergency Fund, Wedding, SIPP, ISA, Round up, Fun Money) - accurate on `main` (that's genuinely
+  what `analytics.SAVINGS_POT_NAMES` matches there) but misleading on `lite`, where a friend's pots
+  won't share those names. Reworded both generically on `lite` only; `main`'s wording is intentionally
+  untouched since it still describes `main`'s real hardcoded behaviour accurately.
+- A new user had no nudge to clear the `Uncategorised` backlog after uploading - Manage Categories
+  exists but nothing points there. Upload Statement now auto-runs `categorise_all` right after a save,
+  then shows a "Still need a category" card per account: the top 10 uncategorised merchants by £
+  impact, each with an inline category picker saving via the same `save_user_rule()` Manage
+  Categories uses. Always shown when there's a backlog (not just right after upload), so it also
+  nudges on return visits.
+- Jonathan proposed also asking a new user about their bank's specific "pots" during onboarding, then
+  self-identified the problem: pots are a Monzo/Starling-specific concept, not something to assume
+  every bank has. Went with a data-driven alternative instead of an upfront question: a new
+  `SavingsBufferMerchant` table (`analytics.py`) plus a "Manage spending-buffer merchants" expander
+  under the Dashboard's trend chart, listing whatever's actually categorised Savings & Investments in
+  the real data and letting the user tag any of them as a spending buffer - the configurable
+  equivalent of the hardcoded "Fun Money" exclusion, but never assuming pots exist at all.
+  Deliberately left `SAVINGS_POT_NAMES` (the withdrawal-netting half) and the `"From B E"` salary
+  detection untouched - still hardcoded to Jonathan's specifics, silently inert for anyone else. Not
+  fixed here; tracked in Known Issues (§8) and Next Actions (§9) as a real follow-up if it matters to
+  an actual friend.
 
 ---
 
