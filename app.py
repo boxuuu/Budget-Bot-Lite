@@ -269,15 +269,14 @@ if page == "Dashboard":
                         f"{savings_info['savings_rate']:.0f}%",
                         delta=f"{format_gbp(savings_info['avg_savings'], decimals=0)}/mo",
                         help=(
-                            "Average monthly saving into your long-term pots (Emergency Fund, "
-                            "Wedding, SIPP, ISA, Round up) as a percentage of typical monthly "
-                            "salary. A withdrawal from one of those pots reduces the figure - "
-                            "money coming back out isn't new saving. Fun Money is excluded "
-                            "entirely (both paying in and drawing down), since it behaves as a "
-                            "spending buffer rather than genuine savings - without that "
-                            "exclusion, its month-to-month churn would swamp real saving "
-                            "elsewhere and could even show a negative rate in months you're "
-                            "actually saving well."
+                            "Average monthly saving into your long-term savings/investment pots, "
+                            "as a percentage of typical monthly salary. A withdrawal from a "
+                            "savings pot reduces the figure - money coming back out isn't new "
+                            "saving. Any pot used as a discretionary spending buffer rather than "
+                            "genuine savings is excluded entirely (both paying in and drawing "
+                            "down), since its month-to-month churn would otherwise swamp real "
+                            "saving elsewhere and could even show a negative rate in a month "
+                            "you're actually saving well."
                         )
                     )
                 else:
@@ -400,11 +399,11 @@ if page == "Dashboard":
         with st.container(border=True, key="card_dashboard_trend"):
             st.subheader("Monthly Spending & Savings Trend")
             st.caption(
-                "Money moving into savings/investment pots (SIPP, ISA, Emergency Fund, Wedding, "
-                "etc.) is saved, not spent - it's shown as its own line rather than inflating "
-                "Spending. The Savings line nets out withdrawals, so it can dip below zero in a "
-                "month where more came out of a pot than went in. Fun Money is excluded entirely, "
-                "since it behaves as a spending buffer rather than genuine savings."
+                "Money moving into savings/investment pots is saved, not spent - it's shown as "
+                "its own line rather than inflating Spending. The Savings line nets out "
+                "withdrawals, so it can dip below zero in a month where more came out of a pot "
+                "than went in. Any pot used as a discretionary spending buffer rather than "
+                "genuine savings is excluded entirely."
             )
             trend_cutoff = render_time_filter("dashboard_trend")
             trend_spending = spending[spending['DateParsed'] >= trend_cutoff] if trend_cutoff else spending
