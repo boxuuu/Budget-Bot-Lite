@@ -1107,14 +1107,14 @@ elif page == "Personal Budget":
 
         from analytics import get_recurring_charges
         from database import load_all_transactions
-        from categoriser import CATEGORIES
         from budget import get_active_dismissals, dismiss_recurring_charge, undismiss_recurring_charge
 
         all_recurring = get_recurring_charges(load_all_transactions())
         dismissals = get_active_dismissals()
 
+        recurring_categories_present = sorted(set(r['category'] for r in all_recurring))
         recurring_cat_filter = st.selectbox(
-            "Filter by category", ["All categories"] + CATEGORIES, key="recurring_category_filter"
+            "Filter by category", ["All categories"] + recurring_categories_present, key="recurring_category_filter"
         )
         if recurring_cat_filter != "All categories":
             all_recurring = [r for r in all_recurring if r['category'] == recurring_cat_filter]
@@ -1248,7 +1248,6 @@ elif page == "Household Budget":
         undismiss_household_recurring_charge
     )
     from analytics import calculate_avg_monthly_spend, get_recurring_charges
-    from categoriser import CATEGORIES
 
     household_transactions_data = load_all_household_transactions()
 
@@ -1280,8 +1279,10 @@ elif page == "Household Budget":
             all_household_recurring = get_recurring_charges(household_transactions_data)
             household_dismissals = get_household_active_dismissals()
 
+            household_recurring_categories_present = sorted(set(r['category'] for r in all_household_recurring))
             household_cat_filter = st.selectbox(
-                "Filter by category", ["All categories"] + CATEGORIES, key="household_recurring_category_filter"
+                "Filter by category", ["All categories"] + household_recurring_categories_present,
+                key="household_recurring_category_filter"
             )
             if household_cat_filter != "All categories":
                 all_household_recurring = [r for r in all_household_recurring if r['category'] == household_cat_filter]
@@ -1590,9 +1591,10 @@ elif page == "Manage Categories":
 
             st.caption(f"{len(merchant_df)} unique merchants")
 
+            categories_present = sorted(merchant_df['Category'].unique().tolist())
             selected_cat = st.selectbox(
                 "Filter by category",
-                ["All categories"] + CATEGORIES,
+                ["All categories"] + categories_present,
                 key=f"{key_prefix}_filter_category"
             )
 
