@@ -1243,75 +1243,12 @@ elif page == "Household Budget":
             st.metric(person2_name, f"£{person2_share:,.2f}")
 
     from household_transactions import (
-        load_all_household_transactions, get_household_transactions_db, HouseholdTransaction,
+        load_all_household_transactions,
         get_household_active_dismissals, dismiss_household_recurring_charge,
         undismiss_household_recurring_charge
     )
     from analytics import calculate_avg_monthly_spend, get_recurring_charges
-    from categoriser import CATEGORIES, save_user_rule
-
-    with st.container(border=True, key="card_household_categorise"):
-        st.caption("Upload Santander statements on the Upload Statement page.")
-        if st.button("Categorise uncategorised household transactions", key="categorise_household"):
-            with st.spinner("Categorising..."):
-                hdb = get_household_transactions_db()
-                rules, ai = categorise_all(hdb, HouseholdTransaction)
-                hdb.close()
-                st.success(f"Done. {rules} categorised by rules, {ai} by Ollama")
-
-    hdb = get_household_transactions_db()
-    household_merchants = hdb.query(
-        HouseholdTransaction.description, HouseholdTransaction.category
-    ).distinct(HouseholdTransaction.description).all()
-    hdb.close()
-
-    if household_merchants:
-        with st.container(border=True, key="card_household_manage_categories"):
-            st.subheader("Manage Categories")
-            st.caption(
-                "Santander sometimes redacts a transaction's description down to mostly "
-                "asterisks - no automatic rule can identify those, so they need a one-off "
-                "manual fix here. It's then remembered for future statements."
-            )
-
-            household_merchant_df = pd.DataFrame([{
-                'Merchant': m.description,
-                'Category': m.category
-            } for m in household_merchants]).sort_values('Merchant')
-
-            household_manage_cat_filter = st.selectbox(
-                "Filter by category", ["All categories"] + CATEGORIES, key="household_manage_category_filter"
-            )
-            if household_manage_cat_filter != "All categories":
-                household_merchant_df = household_merchant_df[
-                    household_merchant_df['Category'] == household_manage_cat_filter
-                ]
-
-            st.dataframe(household_merchant_df, use_container_width=True, hide_index=True)
-
-            st.divider()
-
-            all_household_merchant_names = sorted([m.description for m in household_merchants])
-            household_selected_merchant = st.selectbox(
-                "Select merchant to fix", all_household_merchant_names, key="household_select_merchant"
-            )
-            household_new_category = st.selectbox(
-                "Assign correct category", CATEGORIES, key="household_new_category"
-            )
-            st.caption("Also remembered for this merchant on future statement uploads.")
-
-            if st.button("Update category", key="household_update_category_btn"):
-                hdb = get_household_transactions_db()
-                to_update = hdb.query(HouseholdTransaction).filter_by(
-                    description=household_selected_merchant
-                ).all()
-                for t in to_update:
-                    t.category = household_new_category
-                hdb.commit()
-                hdb.close()
-                save_user_rule(household_selected_merchant, household_new_category)
-                st.success(f"Updated all '{household_selected_merchant}' transactions to '{household_new_category}'")
-                st.rerun()
+    from categoriser import CATEGORIES
 
     household_transactions_data = load_all_household_transactions()
 
@@ -1606,37 +1543,46 @@ elif page == "Manage Categories":
     st.write("Review and correct how each merchant has been categorised.")
 
     from database import get_db, Transaction
+    from household_transactions import get_household_transactions_db, HouseholdTransaction
     from categoriser import CATEGORIES, save_user_rule
 
-    with st.container(border=True, key="card_manage_categorise_actions"):
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("Categorise uncategorised"):
-                with st.spinner("Categorising... this may take a minute"):
-                    db = get_db()
-                    rules, ai = categorise_all(db, Transaction)
-                    db.close()
-                    st.success(f"Done. {rules} categorised by rules, {ai} by Ollama")
+    def render_manage_categories(TransactionModel, get_db_func, key_prefix, intro_caption=None):
+        """Shared by the Personal and Household tabs below - identical bulk-
+        categorise/correct-category flow for either dataset, always run
+        against a single account's Transaction model, never mixed."""
+        if intro_caption:
+            st.caption(intro_caption)
 
-        with col2:
-            if st.button("Re-categorise everything"):
-                with st.spinner("Re-categorising all 935 transactions... this may take a few minutes"):
-                    db = get_db()
-                    rules, ai = recategorise_all(db, Transaction)
-                    db.close()
-                    st.success(f"Done. {rules} categorised by rules, {ai} by Ollama")
+        with st.container(border=True, key=f"card_{key_prefix}_categorise_actions"):
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Categorise uncategorised", key=f"{key_prefix}_categorise_btn"):
+                    with st.spinner("Categorising..."):
+                        db = get_db_func()
+                        rules, ai = categorise_all(db, TransactionModel)
+                        db.close()
+                        st.success(f"Done. {rules} categorised by rules, {ai} by Ollama")
 
-    db = get_db()
-    merchants = db.query(
-        Transaction.description,
-        Transaction.category
-    ).distinct(Transaction.description).all()
-    db.close()
+            with col2:
+                if st.button("Re-categorise everything", key=f"{key_prefix}_recategorise_btn"):
+                    with st.spinner("Re-categorising..."):
+                        db = get_db_func()
+                        rules, ai = recategorise_all(db, TransactionModel)
+                        db.close()
+                        st.success(f"Done. {rules} categorised by rules, {ai} by Ollama")
 
-    if not merchants:
-        st.info("No transactions yet - upload a statement first")
-    else:
-        with st.container(border=True, key="card_manage_merchant_table"):
+        db = get_db_func()
+        merchants = db.query(
+            TransactionModel.description,
+            TransactionModel.category
+        ).distinct(TransactionModel.description).all()
+        db.close()
+
+        if not merchants:
+            st.info("No transactions yet - upload a statement first")
+            return
+
+        with st.container(border=True, key=f"card_{key_prefix}_merchant_table"):
             merchant_df = pd.DataFrame([{
                 'Merchant': m.description,
                 'Category': m.category
@@ -1647,7 +1593,7 @@ elif page == "Manage Categories":
             selected_cat = st.selectbox(
                 "Filter by category",
                 ["All categories"] + CATEGORIES,
-                key="filter_category"
+                key=f"{key_prefix}_filter_category"
             )
 
             if selected_cat != "All categories":
@@ -1655,17 +1601,21 @@ elif page == "Manage Categories":
 
             st.dataframe(merchant_df, use_container_width=True)
 
-        with st.container(border=True, key="card_manage_correct_category"):
+        with st.container(border=True, key=f"card_{key_prefix}_correct_category"):
             st.subheader("Correct a category")
 
             all_merchants = sorted([m.description for m in merchants])
-            selected_merchant = st.selectbox("Select merchant to fix", all_merchants, key="select_merchant")
-            new_category = st.selectbox("Assign correct category", CATEGORIES, key="new_category")
+            selected_merchant = st.selectbox(
+                "Select merchant to fix", all_merchants, key=f"{key_prefix}_select_merchant"
+            )
+            new_category = st.selectbox(
+                "Assign correct category", CATEGORIES, key=f"{key_prefix}_new_category"
+            )
             st.caption("Also remembered for this merchant on future statement uploads.")
 
-            if st.button("Update category"):
-                db = get_db()
-                transactions_to_update = db.query(Transaction).filter_by(
+            if st.button("Update category", key=f"{key_prefix}_update_category_btn"):
+                db = get_db_func()
+                transactions_to_update = db.query(TransactionModel).filter_by(
                     description=selected_merchant
                 ).all()
                 for t in transactions_to_update:
@@ -1674,3 +1624,19 @@ elif page == "Manage Categories":
                 db.close()
                 save_user_rule(selected_merchant, new_category)
                 st.success(f"Updated all '{selected_merchant}' transactions to '{new_category}'")
+                st.rerun()
+
+    tab_personal, tab_household = st.tabs(["Personal", "Household"])
+
+    with tab_personal:
+        render_manage_categories(Transaction, get_db, "manage_personal")
+
+    with tab_household:
+        render_manage_categories(
+            HouseholdTransaction, get_household_transactions_db, "manage_household",
+            intro_caption=(
+                "Santander sometimes redacts a transaction's description down to mostly "
+                "asterisks - no automatic rule can identify those, so they need a one-off "
+                "manual fix here."
+            )
+        )
