@@ -154,9 +154,17 @@ for scrollable message history.
   what makes any edit reset progress toward the goal.
 
 ## Categories used
-Salary, Groceries, Eating Out & Takeaway, Coffee & Beans, Shopping, Transport, Health & Fitness,
-Subscriptions, Phone & Internet, Insurance & Finance, Savings & Investments, Charity,
-Bills & Utilities, Rent & Housing, Other
+User-editable via a `Category` table (`categoriser.py`), managed from the Manage Categories page's
+"Manage category list" expander (`get_categories`/`add_category`/`remove_category`) rather than a
+hardcoded list. Seeded on first use from `DEFAULT_CATEGORIES`: Salary, Groceries, Eating Out &
+Takeaway, Shopping, Transport, Health & Fitness, Subscriptions, Phone & Internet, Insurance &
+Finance, Savings & Investments, Charity, Bills & Utilities, Rent & Housing, Other. "Coffee & Beans"
+was folded into Eating Out & Takeaway (2026-08-19) — too narrow a default, and its only three
+`KNOWN_RULES` entries were hyper-local Manchester coffee shops, not generic merchants. "Savings &
+Investments" is in `PROTECTED_CATEGORIES` and can't be removed via the UI, since the Savings Rate
+KPI, the Dashboard's trend-chart/top-merchants splits, and the Goals page's discretionary-spend
+calculation all match it by exact string, not by list membership — deleting it wouldn't crash those
+features, just silently break them.
 
 Salary is income only (identified via "From B E" transactions) and is never included in spending
 totals. Savings & Investments figures used for the Savings Rate calculation (Dashboard KPI, the

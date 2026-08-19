@@ -1,5 +1,5 @@
 import ollama
-from sqlalchemy import create_engine, Column, String
+from sqlalchemy import create_engine, Column, String, Integer
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 Base = declarative_base()
@@ -19,6 +19,18 @@ class CategoryRule(Base):
 
     merchant = Column(String, primary_key=True)  # lowercased, exact match
     category = Column(String)
+
+class Category(Base):
+    """The user-editable list of spending categories offered throughout the
+    app (Manage Categories dropdowns, Ollama's prompt, chat's tool schema).
+    Seeded from DEFAULT_CATEGORIES on first use, then lives entirely in the
+    database - add_category/remove_category let a user extend or trim the
+    list from there. sort_order preserves a sensible dropdown order (Salary
+    first, Other last) instead of falling back to alphabetical."""
+    __tablename__ = 'categories'
+
+    name = Column(String, primary_key=True)
+    sort_order = Column(Integer)
 
 def get_categoriser_db():
     engine = create_engine('sqlite:///budget_bot.db')
@@ -43,11 +55,10 @@ def save_user_rule(merchant_name, category):
     db.commit()
     db.close()
 
-CATEGORIES = [
+DEFAULT_CATEGORIES = [
     "Salary",
     "Groceries",
     "Eating Out & Takeaway",
-    "Coffee & Beans",
     "Shopping",
     "Transport",
     "Health & Fitness",
@@ -60,6 +71,61 @@ CATEGORIES = [
     "Rent & Housing",
     "Other"
 ]
+
+# Categories the rest of the app depends on by exact name, not just as a
+# label - deleting them wouldn't crash anything, but would silently break
+# real features. "Savings & Investments" is matched by exact string in the
+# Savings Rate KPI, the Dashboard's trend-chart/top-merchants splits, and
+# the Goals page's discretionary-spend calculation (see analytics.py,
+# goals.py, app.py) - removable elsewhere, never here.
+PROTECTED_CATEGORIES = {"Savings & Investments"}
+
+def get_categories():
+    """The current category list, in display order. Seeds the categories
+    table from DEFAULT_CATEGORIES the first time this is ever called (a
+    fresh database has no rows yet) - after that, the database is the only
+    source of truth, so add_category/remove_category changes persist."""
+    db = get_categoriser_db()
+    if db.query(Category).count() == 0:
+        for i, name in enumerate(DEFAULT_CATEGORIES):
+            db.add(Category(name=name, sort_order=i))
+        db.commit()
+    categories = [c.name for c in db.query(Category).order_by(Category.sort_order).all()]
+    db.close()
+    return categories
+
+def add_category(name):
+    """Adds a new category at the end of the list. Returns False (no-op)
+    for a blank name or one that already exists (case-sensitive - matching
+    Category.name's exact-string usage everywhere else)."""
+    name = name.strip()
+    if not name:
+        return False
+    db = get_categoriser_db()
+    if db.query(Category).filter_by(name=name).first():
+        db.close()
+        return False
+    next_order = db.query(Category).count()
+    db.add(Category(name=name, sort_order=next_order))
+    db.commit()
+    db.close()
+    return True
+
+def remove_category(name):
+    """Removes a category from the selectable list. Returns False (no-op)
+    for a protected category. Deliberately does NOT touch transactions
+    already tagged with this category - they keep showing/filtering
+    normally everywhere (categories are read from the data itself, not
+    this list), they just can't be re-selected here going forward."""
+    if name in PROTECTED_CATEGORIES:
+        return False
+    db = get_categoriser_db()
+    category = db.query(Category).filter_by(name=name).first()
+    if category:
+        db.delete(category)
+        db.commit()
+    db.close()
+    return True
 
 # Known rules - these are applied before Ollama is even consulted.
 # Corrections made on the Manage Categories page are no longer added here
@@ -85,9 +151,9 @@ KNOWN_RULES = {
     "domino": "Eating Out & Takeaway",
     "nando": "Eating Out & Takeaway",
     "kfc": "Eating Out & Takeaway",
-    "oddy knocky": "Coffee & Beans",
-    "kickback": "Coffee & Beans",
-    "coffeehit": "Coffee & Beans",
+    "oddy knocky": "Eating Out & Takeaway",
+    "kickback": "Eating Out & Takeaway",
+    "coffeehit": "Eating Out & Takeaway",
     "two wombats": "Eating Out & Takeaway",
     "station south": "Eating Out & Takeaway",
     "pod point": "Transport",
@@ -234,18 +300,18 @@ def search_merchant_web(merchant_name):
     return ""
 
 def categorise_with_ollama(merchant_name, context, web_context=""):
+    categories = get_categories()
     prompt = f"""You are a UK personal finance assistant categorising bank transactions for someone based in Manchester.
 
 Categorise this merchant into exactly one of these categories:
-{chr(10).join(f'- {c}' for c in CATEGORIES)}
+{chr(10).join(f'- {c}' for c in categories)}
 
 Merchant: {merchant_name}
 Context: {context}
 Web search info: {web_context}
 
 Some guidance:
-- Coffee shops and specialty coffee roasters = Coffee & Beans
-- Restaurants, pubs, bars, fast food, takeaway apps = Eating Out & Takeaway
+- Restaurants, pubs, bars, fast food, takeaway apps, coffee shops = Eating Out & Takeaway
 - Supermarkets and food delivery services = Groceries
 - Gym memberships, martial arts, sport = Health & Fitness
 - Streaming, gaming, digital subscriptions = Subscriptions
@@ -256,15 +322,15 @@ Some guidance:
 
 Reply with only the category name, nothing else.
 """
-    
+
     response = ollama.chat(
         model='llama3.2',
         messages=[{'role': 'user', 'content': prompt}]
     )
-    
+
     result = response['message']['content'].strip()
-    
-    if result in CATEGORIES:
+
+    if result in categories:
         return result
     return "Other"
 

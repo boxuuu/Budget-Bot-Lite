@@ -1545,7 +1545,7 @@ elif page == "Manage Categories":
 
     from database import get_db, Transaction
     from household_transactions import get_household_transactions_db, HouseholdTransaction
-    from categoriser import CATEGORIES, save_user_rule
+    from categoriser import get_categories, save_user_rule, add_category, remove_category, PROTECTED_CATEGORIES
 
     def render_manage_categories(TransactionModel, get_db_func, key_prefix, intro_caption=None):
         """Shared by the Personal and Household tabs below - identical bulk-
@@ -1606,7 +1606,7 @@ elif page == "Manage Categories":
             edited_df = st.data_editor(
                 display_df,
                 column_config={
-                    'Category': st.column_config.SelectboxColumn(options=CATEGORIES, required=True)
+                    'Category': st.column_config.SelectboxColumn(options=get_categories(), required=True)
                 },
                 disabled=['Merchant'],
                 hide_index=True,
@@ -1631,6 +1631,36 @@ elif page == "Manage Categories":
                     db.close()
                     st.success(f"Updated {len(changed_rows)} merchant(s). Also remembered for future statement uploads.")
                     st.rerun()
+
+    with st.expander("Manage category list"):
+        st.caption(
+            "Add or remove categories - shared across Personal and Household. \"Savings & "
+            "Investments\" can't be removed, since the Savings Rate KPI, the Dashboard's trend "
+            "chart, and the Goals page all depend on it by name. Removing any other category "
+            "just stops it being offered here - merchants already tagged with it keep showing "
+            "and filtering fine, they just can't be re-selected."
+        )
+        add_col, button_col = st.columns([4, 1])
+        with add_col:
+            new_category_name = st.text_input(
+                "New category name", key="new_category_name", label_visibility="collapsed"
+            )
+        with button_col:
+            if st.button("Add", key="add_category_btn"):
+                if add_category(new_category_name):
+                    st.success(f"Added '{new_category_name.strip()}'")
+                    st.rerun()
+                else:
+                    st.warning("Enter a category name that doesn't already exist.")
+
+        for category_name in get_categories():
+            name_col, action_col = st.columns([4, 1])
+            name_col.write(category_name)
+            if category_name in PROTECTED_CATEGORIES:
+                action_col.caption("Required")
+            elif action_col.button("Remove", key=f"remove_category_{category_name}"):
+                remove_category(category_name)
+                st.rerun()
 
     tab_personal, tab_household = st.tabs(["Personal", "Household"])
 

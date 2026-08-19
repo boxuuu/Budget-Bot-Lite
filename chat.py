@@ -3,7 +3,7 @@ import json
 import difflib
 from datetime import datetime
 from database import get_db, Transaction
-from categoriser import CATEGORIES
+from categoriser import get_categories
 from networth import get_asset_names, get_asset_name_tags, project_net_worth
 from analytics import month_sort_key, calculate_savings_rate, net_spend_amount, format_gbp
 
@@ -137,7 +137,7 @@ Do not say you don't have access to data. All the data you need is right here.
 {context}
 
 Available categories:
-{chr(10).join(f'- {c}' for c in CATEGORIES)}
+{chr(10).join(f'- {c}' for c in get_categories())}
 
 You can:
 1. Answer questions about spending using the exact figures from the data above
@@ -225,7 +225,7 @@ def build_tools(asset_names, asset_tags=None):
                         "new_category": {
                             "type": "string",
                             "description": "The correct category",
-                            "enum": CATEGORIES
+                            "enum": get_categories()
                         }
                     },
                     "required": ["merchant_name", "new_category"]
@@ -436,7 +436,7 @@ def chat_with_budget_bot(messages, user_message):
 
     if name == 'update_category':
         merchant_name = args.get('merchant_name', '')
-        resolved_category = resolve_fuzzy(args.get('new_category', ''), CATEGORIES)
+        resolved_category = resolve_fuzzy(args.get('new_category', ''), get_categories())
 
         db = get_db()
         count = db.query(Transaction).filter(
