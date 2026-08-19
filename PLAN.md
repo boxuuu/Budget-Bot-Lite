@@ -273,12 +273,10 @@ categories are user-editable (add/remove) on both branches instead of a hardcode
   for a friend on lite whose bank doesn't share those exact strings, the Savings Rate KPI just shows
   N/A and pot-withdrawal netting silently never fires. Not broken, just inert. Worth making
   configurable the same way if it comes up as a recurring annoyance for an actual friend.
-- **28 of Jonathan's real transactions are still tagged "Coffee & Beans"**, a category removed from
-  `DEFAULT_CATEGORIES` 2026-08-19 (see Session Log). Left deliberately untouched rather than
-  bulk-migrated — they still display/filter fine everywhere (categories are read from the data, not
-  the list), they just can't be re-selected as "Coffee & Beans" going forward. Clicking
-  "Re-categorise everything" on the Personal tab would flip them to Eating Out & Takeaway naturally
-  (their `KNOWN_RULES` entries now point there) — offered to Jonathan, his call whether/when to do it.
+- ~~**28 of Jonathan's real transactions were still tagged "Coffee & Beans"**~~ — **resolved
+  2026-08-19, same day**: bulk-updated all 28 directly to Eating Out & Takeaway (Jonathan asked for
+  it immediately after the category was removed from `DEFAULT_CATEGORIES`, rather than leaving them
+  as legacy leftovers). "Coffee & Beans" no longer appears anywhere in the real database.
 
 ## 9. Next Actions
 
@@ -290,8 +288,6 @@ categories are user-editable (add/remove) on both branches instead of a hardcode
 3. *(Low priority, only if it comes up)* If Jonathan starts using per-pension projections regularly,
    revisit the Mar 2025 pension-transfer distortion noted in Known Issues — would need a way to tag a
    specific asset-value change as "transfer" so it's excluded from that asset's growth rate.
-4. *(Jonathan's call)* Decide whether to bulk-migrate the 28 real "Coffee & Beans" transactions to
-   Eating Out & Takeaway now, or leave them as legacy leftovers — see Known Issues.
 
 ## 10. Session Log
 
@@ -978,10 +974,11 @@ Also reviewed the default category list per Jonathan's flag that "Coffee & Beans
 confirmed it in the code: its only three `KNOWN_RULES` entries (oddy knocky, kickback, coffeehit) are
 hyper-local Manchester coffee shops, not generic merchants, which shouldn't have been in `lite`'s
 "kept deliberately generic" rules list in the first place. Folded it into Eating Out & Takeaway in
-`DEFAULT_CATEGORIES` and remapped those three rules; Jonathan's real database has 28 transactions
-still tagged "Coffee & Beans" from before this change, left untouched rather than bulk-migrated (see
-Known Issues) - they display/filter fine as-is, and a "Re-categorise everything" click would migrate
-them naturally via the updated rules whenever Jonathan wants.
+`DEFAULT_CATEGORIES` and remapped those three rules; initially left the 28 real transactions still
+tagged "Coffee & Beans" untouched (they display/filter fine either way), but Jonathan asked to
+migrate them immediately rather than leave them as legacy leftovers - bulk-updated directly via a
+one-off script against `database.Transaction` (targeted, not a full `recategorise_all`, since the
+correct mapping was already known). Confirmed zero "Coffee & Beans" rows remain.
 
 Built on `main` first (touching `categoriser.py`, `chat.py`'s three `CATEGORIES` usages, and
 `app.py`), then merged into `lite` per the usual convention. The merge needed manual conflict
