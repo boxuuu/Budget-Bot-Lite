@@ -1111,11 +1111,9 @@ elif page == "Personal Budget":
     with st.container(border=True, key="card_personal_recurring"):
         st.subheader("Recurring Charges (last 3 months)")
         st.caption(
-            "Merchants you've paid at least twice in the last 3 months, with their average "
-            "amount. This isn't matched against your Money Out list above - compare it yourself. "
-            "\"Add to budget\" adds it and marks it reviewed; \"Already in budget\" / \"Not "
-            "recurring\" just mark it reviewed. Reviewed items move below for 6 months, then "
-            "resurface automatically - nothing gets permanently hidden."
+            "Keep on top of your recurring charges - check each merchant against your budget. "
+            "Already covered? Select \"In budget\". Want to add it? Select \"Add\". Genuinely a "
+            "one-off? Select \"Not recurring\"."
         )
 
         from analytics import get_recurring_charges
@@ -1273,20 +1271,17 @@ elif page == "Household Budget":
                 f"£{actual_spend:,.2f}",
                 delta=f"£{gap:,.2f} vs budgeted Total",
                 delta_color="inverse",
-                help="Real average monthly outflow from uploaded Santander transactions. If "
-                     "higher than the budgeted Total above, something you're actually being "
-                     "charged for isn't reflected in the Household Bills list - see Recurring "
-                     "Charges below."
+                help="Real average monthly outflow from your uploaded transactions. If it's "
+                     "higher than the budgeted Total, something you're paying for probably isn't "
+                     "in the Household Bills list yet - check Recurring Charges below."
             )
 
         with st.container(border=True, key="card_household_recurring"):
             st.subheader("Recurring Charges (last 3 months)")
             st.caption(
-                "Merchants charged at least twice in the last 3 months of Santander transactions, "
-                "with their average amount. Not matched against the Household Bills list above - "
-                "compare it yourself. \"Add to budget\" adds it and marks it reviewed; \"Already "
-                "in budget\" / \"Not recurring\" just mark it reviewed. Reviewed items move below "
-                "for 6 months, then resurface automatically."
+                "Keep on top of your household's recurring charges - check each merchant against "
+                "your budget. Already covered? Select \"In budget\". Want to add it? Select "
+                "\"Add\". Genuinely a one-off? Select \"Not recurring\"."
             )
 
             all_household_recurring = get_recurring_charges(household_transactions_data)
