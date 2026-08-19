@@ -205,7 +205,8 @@ Known Issues). Outside the original 8 stages: the recurring-charges checklist (S
 above) is built for both Personal and Household Budget, and the app now supports two separate bank
 accounts (Chase personal, Santander household) with fully isolated data. As of 2026-08-17, Budget
 Bot Lite (public fork for friends, no AI) also exists and is past its first real testing pass — see
-Session Log for the full build-and-fix history.
+Session Log for the full build-and-fix history. As of 2026-08-19, `lite` also has a README, and
+categories are user-editable (add/remove) on both branches instead of a hardcoded list.
 
 ## 8. Known Issues
 
@@ -272,6 +273,12 @@ Session Log for the full build-and-fix history.
   for a friend on lite whose bank doesn't share those exact strings, the Savings Rate KPI just shows
   N/A and pot-withdrawal netting silently never fires. Not broken, just inert. Worth making
   configurable the same way if it comes up as a recurring annoyance for an actual friend.
+- **28 of Jonathan's real transactions are still tagged "Coffee & Beans"**, a category removed from
+  `DEFAULT_CATEGORIES` 2026-08-19 (see Session Log). Left deliberately untouched rather than
+  bulk-migrated — they still display/filter fine everywhere (categories are read from the data, not
+  the list), they just can't be re-selected as "Coffee & Beans" going forward. Clicking
+  "Re-categorise everything" on the Personal tab would flip them to Eating Out & Takeaway naturally
+  (their `KNOWN_RULES` entries now point there) — offered to Jonathan, his call whether/when to do it.
 
 ## 9. Next Actions
 
@@ -283,6 +290,8 @@ Session Log for the full build-and-fix history.
 3. *(Low priority, only if it comes up)* If Jonathan starts using per-pension projections regularly,
    revisit the Mar 2025 pension-transfer distortion noted in Known Issues — would need a way to tag a
    specific asset-value change as "transfer" so it's excluded from that asset's growth rate.
+4. *(Jonathan's call)* Decide whether to bulk-migrate the 28 real "Coffee & Beans" transactions to
+   Eating Out & Takeaway now, or leave them as legacy leftovers — see Known Issues.
 
 ## 10. Session Log
 
@@ -932,6 +941,61 @@ Two gaps specific to a brand new `lite` user, raised by Jonathan after testing u
   detection untouched - still hardcoded to Jonathan's specifics, silently inert for anyone else. Not
   fixed here; tracked in Known Issues (§8) and Next Actions (§9) as a real follow-up if it matters to
   an actual friend.
+
+### 2026-08-19 — README for lite, friendlier Recurring Charges copy, user-editable categories
+Three separate small-to-medium asks in one session, all shipped to both `main` and `lite` (or
+`lite`-only where noted). First, added `README.md` to `lite` (setup/run instructions) - the public
+repo had no onboarding doc beyond source files, so a friend cloning it had no path from "cloned" to
+"running" without asking Jonathan directly. `lite`-only, since `main` has no equivalent audience.
+
+Second, rewrote both Recurring Charges cards' copy (Personal and Household Budget) - shorter,
+friendlier tone, and the Household card's caption/help text no longer names "Santander" directly
+(inaccurate for a friend on a different bank). `lite`-only for the same reason as the README.
+
+Third, the larger piece: categories were a hardcoded Python list, so adding or removing one meant
+editing code. Investigated where `CATEGORIES` was actually used before touching anything - found the
+rest of the app already reads categories dynamically from the data itself (View Transactions, Manage
+Categories, and Recurring Charges filters), so the static list only actually constrained two
+dropdowns (the Manage Categories bulk-edit table and, on `lite`, the Upload Statement page's
+uncategorised-merchant nudge). Moved the list into a new `Category` table (`categoriser.py`,
+`name`/`sort_order`) seeded from `DEFAULT_CATEGORIES` on first use, with `get_categories`/
+`add_category`/`remove_category` and a new "Manage category list" expander on the Manage Categories
+page (shared once across the Personal/Household tabs, not duplicated, since the list is global).
+Verified add/remove/duplicate-name/protected-removal logic against a scratch copy of the real
+database before touching anything live.
+
+Jonathan asked specifically that "Savings & Investments" can't be removed - traced it to four exact-
+string matches (`analytics.calculate_savings_rate`/`get_monthly_spend`, `goals.get_discretionary_
+monthly_spend`, the Dashboard's trend-chart/top-merchants splits) that would silently misreport
+rather than crash if the category disappeared. Added `PROTECTED_CATEGORIES` in `categoriser.py`
+(currently just this one) and blocked its removal in the UI and in `remove_category()` itself, not
+just at the button level. Left the four `goals.NON_DISCRETIONARY_CATEGORIES` (Rent & Housing, Bills &
+Utilities, Insurance & Finance, Phone & Internet) deletable but undocumented as protected - removing
+one only stops future transactions being excluded from the Spend Ceiling, a narrower and more
+self-correcting consequence than losing Savings & Investments entirely.
+
+Also reviewed the default category list per Jonathan's flag that "Coffee & Beans" was too specific -
+confirmed it in the code: its only three `KNOWN_RULES` entries (oddy knocky, kickback, coffeehit) are
+hyper-local Manchester coffee shops, not generic merchants, which shouldn't have been in `lite`'s
+"kept deliberately generic" rules list in the first place. Folded it into Eating Out & Takeaway in
+`DEFAULT_CATEGORIES` and remapped those three rules; Jonathan's real database has 28 transactions
+still tagged "Coffee & Beans" from before this change, left untouched rather than bulk-migrated (see
+Known Issues) - they display/filter fine as-is, and a "Re-categorise everything" click would migrate
+them naturally via the updated rules whenever Jonathan wants.
+
+Built on `main` first (touching `categoriser.py`, `chat.py`'s three `CATEGORIES` usages, and
+`app.py`), then merged into `lite` per the usual convention. The merge needed manual conflict
+resolution in `categoriser.py`: kept the new `Category`/`get_categories`/`add_category`/
+`remove_category` code (applies identically on both branches) but dropped `main`-only pieces that
+don't belong on `lite` (the `import ollama`, `get_merchant_context`/`search_merchant_web`/
+`categorise_with_ollama` functions, and `main`'s Ollama-referencing comment above `KNOWN_RULES`,
+restoring `lite`'s own "no AI fallback in this build" comment instead). `PLAN.md` and `chat.py`
+stayed deleted on `lite` as before (both are `main`-only by design). Also caught and fixed one
+`lite`-only leftover the merge didn't touch - the Upload Statement page's uncategorised-merchant
+nudge (`app.py`) still imported the old static `CATEGORIES` symbol, since it has no counterpart on
+`main` and so wasn't part of the merge's diff at all. Compiled and functionally tested both branches'
+`categoriser.py` before pushing; confirmed no other stale `CATEGORIES` references remained on either
+branch. Pushed both `main` (`origin`) and `lite` (`lite` remote).
 
 ---
 
