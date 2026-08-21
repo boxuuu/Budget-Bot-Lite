@@ -1619,6 +1619,12 @@ elif page == "Manage Categories":
                 if changed_rows.empty:
                     st.info("No changes to save.")
                 else:
+                    # Two separate passes, not interleaved - save_user_rule opens its
+                    # own SQLite connection to the same file, and calling it mid-loop
+                    # while this session's transaction is still open (uncommitted)
+                    # caused a real "database is locked" error, since SQLite only
+                    # allows one writer at a time. Committing and closing this
+                    # session fully before any save_user_rule call avoids the overlap.
                     db = get_db_func()
                     for _, row in changed_rows.iterrows():
                         transactions_to_update = db.query(TransactionModel).filter_by(
@@ -1626,9 +1632,12 @@ elif page == "Manage Categories":
                         ).all()
                         for t in transactions_to_update:
                             t.category = row['Category']
-                        save_user_rule(row['Merchant'], row['Category'])
                     db.commit()
                     db.close()
+
+                    for _, row in changed_rows.iterrows():
+                        save_user_rule(row['Merchant'], row['Category'])
+
                     st.success(f"Updated {len(changed_rows)} merchant(s). Also remembered for future statement uploads.")
                     st.rerun()
 
